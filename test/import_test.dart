@@ -12,6 +12,18 @@ List<int> workbook(List<List<CellValue?>> rows) {
 }
 void main() {
   const settings = StoreSettings(rate: 10000, margin: 20);
+  test('mixed-currency Excel export roundtrip and SYP-only imports work', () {
+    final local = const Product(id: 'local', name: 'محلي').edit(costCurrency: 'SYP', costLocal: 5000, settings: settings);
+    final usd = const Product(id: 'usd', name: 'مستورد').edit(costUsd: 2, settings: settings);
+    final roundtrip = StoreFiles.preview(StoreFiles.productExcel([local, usd], settings), [], settings, () => 'new');
+    expect(roundtrip.warnings, isEmpty); expect(roundtrip.products.first.costCurrency, 'SYP');
+    expect(roundtrip.products.first.price(settings), 6000); expect(roundtrip.products.last.costUsd, 2);
+    final plan = StoreFiles.preview(workbook([
+      [TextCellValue('اسم المادة'), TextCellValue('رأس المال بالسوري')],
+      [TextCellValue('مادة سورية'), DoubleCellValue(5000)],
+    ]), [], settings, () => 'new');
+    expect(plan.warnings, isEmpty); expect(plan.products.single.costLocal, 5000);
+  });
   test('external editor workbook adds an unbarcoded item and updates existing rows', () {
     final bytes = base64Decode(File('test/fixtures/edited_excel.base64').readAsStringSync().trim());
     const existing = [

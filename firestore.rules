@@ -10,13 +10,47 @@ service cloud.firestore {
         membership(store).role in ['owner', 'worker'];
     }
     function owner(store) { return member(store) && membership(store).role == 'owner'; }
+    function can(store, key) {
+      return owner(store) || (member(store) && membership(store).get('permissions', {}).get(key,
+        key in ['useCalculator', 'viewStocktake', 'countStock']) == true);
+    }
+    function costEditor(store) { return can(store, 'editCost') && can(store, 'viewCost'); }
+    function countAllowed(store) { return can(store, 'viewStocktake') && can(store, 'countStock'); }
+    function writer(store) {
+      return owner(store) || can(store, 'addProduct') || can(store, 'deleteProduct') ||
+        can(store, 'editDetails') || can(store, 'editQuantity') || can(store, 'editSalePrice') ||
+        costEditor(store) || can(store, 'editExchangeRate');
+    }
+    function validPermissions(p) {
+      return p is map && p.keys().hasOnly(['viewCost', 'editExchangeRate', 'addProduct', 'deleteProduct', 'editDetails', 'editQuantity', 'editSalePrice', 'editCost', 'useCalculator', 'viewStocktake', 'countStock', 'viewHistory']) &&
+        p.get('viewCost', false) is bool &&
+        p.get('editExchangeRate', false) is bool &&
+        p.get('addProduct', false) is bool &&
+        p.get('deleteProduct', false) is bool &&
+        p.get('editDetails', false) is bool &&
+        p.get('editQuantity', false) is bool &&
+        p.get('editSalePrice', false) is bool &&
+        p.get('editCost', false) is bool &&
+        p.get('useCalculator', false) is bool &&
+        p.get('viewStocktake', false) is bool &&
+        p.get('countStock', false) is bool &&
+        p.get('viewHistory', false) is bool &&
+        (!p.get('editCost', false) || p.get('viewCost', false)) &&
+        (!p.get('countStock', false) || p.get('viewStocktake', false));
+    }
+    function deletable(store, product) {
+      let active = /databases/$(database)/documents/stores/$(store)/stocktakes/active;
+      return !exists(active) || get(active).data.closed == true || !get(active).data.productIds.hasAny([product]);
+    }
     function nonnegative(n) { return n is number && n >= 0 && n <= 1000000000000; }
     function validProduct() {
       let d = request.resource.data;
       return d.keys().hasAll(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision']) &&
-        d.keys().hasOnly(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision', 'updatedBy', 'updatedAt']) &&
+        d.keys().hasOnly(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision', 'updatedBy', 'updatedAt', 'costCurrency', 'saleBaseLocal']) &&
         d.name is string && d.name.size() > 0 && d.name.size() <= 120 &&
         d.category is string && d.category.size() <= 80 && d.barcode is string && d.barcode.size() <= 80 &&
+        d.get('costCurrency', 'USD') in ['USD', 'SYP'] &&
+        (d.get('saleBaseLocal', null) == null || nonnegative(d.saleBaseLocal)) &&
         d.pack is int && d.pack >= 1 && d.pack <= 100000 &&
         nonnegative(d.quantity) && nonnegative(d.saleBaseUsd) &&
         (d.manualPrice == null || nonnegative(d.manualPrice)) && d.ready is bool && d.revision is int;
@@ -27,7 +61,8 @@ service cloud.firestore {
         allow get: if signedIn() && (request.auth.uid == user || owner(store));
         allow list: if owner(store);
         allow create, update: if owner(store) &&
-          request.resource.data.keys().hasOnly(['name', 'role', 'active']) &&
+          request.resource.data.keys().hasOnly(['name', 'role', 'active', 'permissions']) &&
+          validPermissions(request.resource.data.get('permissions', {})) &&
           request.resource.data.name is string && request.resource.data.name.size() <= 100 &&
           request.resource.data.role in ['owner', 'worker'] && request.resource.data.active is bool &&
           (request.auth.uid != user || (request.resource.data.role == 'owner' && request.resource.data.active == true));
@@ -35,7 +70,9 @@ service cloud.firestore {
       }
       match /settings/current {
         allow read: if member(store);
-        allow create, update: if owner(store) &&
+        allow create, update: if (owner(store) || (can(store, 'editExchangeRate') && resource != null &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rate', 'revision']) &&
+          request.resource.data.revision == resource.data.revision + 1)) &&
           request.resource.data.keys().hasOnly(['rate', 'margin', 'currency', 'revision']) &&
           request.resource.data.rate is number && request.resource.data.rate > 0 && request.resource.data.rate <= 1000000000 &&
           nonnegative(request.resource.data.margin) && request.resource.data.currency is string &&
@@ -44,42 +81,72 @@ service cloud.firestore {
       }
       match /products/{product} {
         allow read: if member(store);
-        allow create: if owner(store) && validProduct() && request.resource.data.revision >= 1;
-        allow update: if owner(store) && validProduct() && request.resource.data.revision == resource.data.revision + 1;
-        // Keep history stable: deletion is intentionally absent from v0.1.
+        allow create: if can(store, 'addProduct') && validProduct() && request.resource.data.revision >= 1 &&
+          (owner(store) || (
+            (can(store, 'editQuantity') || request.resource.data.quantity == 0) &&
+            (can(store, 'editSalePrice') || request.resource.data.manualPrice == null) &&
+            (costEditor(store) || (request.resource.data.saleBaseUsd == 0 &&
+              request.resource.data.get('saleBaseLocal', null) == null && request.resource.data.get('costCurrency', 'USD') == 'USD')) &&
+            (costEditor(store) || can(store, 'editSalePrice') || request.resource.data.ready == false)));
+        allow update: if member(store) && validProduct() && request.resource.data.revision == resource.data.revision + 1 &&
+          (owner(store) || (
+            request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time &&
+            (can(store, 'editDetails') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['name', 'category', 'barcode', 'pack'])) &&
+            (can(store, 'editQuantity') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['quantity'])) &&
+            (can(store, 'editSalePrice') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['manualPrice'])) &&
+            (costEditor(store) || (request.resource.data.saleBaseUsd == resource.data.saleBaseUsd &&
+              request.resource.data.get('saleBaseLocal', null) == resource.data.get('saleBaseLocal', null) &&
+              request.resource.data.get('costCurrency', 'USD') == resource.data.get('costCurrency', 'USD'))) &&
+            (costEditor(store) || can(store, 'editSalePrice') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ready'])) &&
+            (can(store, 'editDetails') || can(store, 'editQuantity') || can(store, 'editSalePrice') || costEditor(store))));
+        allow delete: if can(store, 'deleteProduct') && deletable(store, product);
       }
       match /pricing/{product} {
-        allow read: if owner(store);
-        allow create, update: if owner(store) &&
-          request.resource.data.keys().hasOnly(['costUsd', 'margin']) &&
+        allow read: if can(store, 'viewCost');
+        allow create, update: if costEditor(store) &&
+          request.resource.data.keys().hasOnly(['costUsd', 'costLocal', 'margin']) &&
           (request.resource.data.costUsd == null || nonnegative(request.resource.data.costUsd)) &&
-          (request.resource.data.margin == null || nonnegative(request.resource.data.margin));
+          (request.resource.data.get('costLocal', null) == null || nonnegative(request.resource.data.costLocal)) &&
+          (request.resource.data.margin == null || nonnegative(request.resource.data.margin)) &&
+          (request.resource.data.costUsd == null || request.resource.data.get('costLocal', null) == null) &&
+          existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(product)) &&
+          ((getAfter(/databases/$(database)/documents/stores/$(store)/products/$(product)).data.get('costCurrency', 'USD') == 'USD' && request.resource.data.get('costLocal', null) == null) ||
+           (getAfter(/databases/$(database)/documents/stores/$(store)/products/$(product)).data.get('costCurrency', 'USD') == 'SYP' && request.resource.data.costUsd == null));
+        allow delete: if can(store, 'deleteProduct') && !existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(product));
       }
       match /barcodes/{code} {
-        allow read, delete: if owner(store);
-        allow create, update: if owner(store) && request.resource.data.keys().hasOnly(['productId']) &&
-          request.resource.data.productId is string;
+        allow read: if can(store, 'addProduct') || can(store, 'editDetails') || can(store, 'deleteProduct');
+        allow create, update: if (can(store, 'addProduct') || can(store, 'editDetails')) &&
+          request.resource.data.keys().hasOnly(['productId']) && request.resource.data.productId is string &&
+          existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(request.resource.data.productId)) &&
+          getAfter(/databases/$(database)/documents/stores/$(store)/products/$(request.resource.data.productId)).data.barcode != '' &&
+          (resource == null || resource.data.productId == request.resource.data.productId);
+        allow delete: if (can(store, 'deleteProduct') || can(store, 'editDetails')) &&
+          (!existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)) ||
+           getAfter(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)).data.barcode !=
+           get(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)).data.barcode);
       }
       match /priceChanges/{change} {
-        allow read: if owner(store);
-        allow create: if owner(store) && request.resource.data.uid == request.auth.uid &&
+        allow read: if can(store, 'viewHistory');
+        allow create: if writer(store) && request.resource.data.uid == request.auth.uid &&
           request.resource.data.keys().hasOnly(['name', 'actor', 'kind', 'at', 'before', 'after', 'uid']) &&
           request.resource.data.at is string && nonnegative(request.resource.data.before) && nonnegative(request.resource.data.after);
       }
       match /stocktakes/active {
-        allow read: if member(store);
+        allow get: if can(store, 'viewStocktake') || can(store, 'deleteProduct');
+        allow list: if can(store, 'viewStocktake');
         allow create, update: if owner(store) && request.resource.data.keys().hasOnly(['id', 'at', 'rate', 'currency', 'closed', 'countRevision', 'productIds']) &&
           request.resource.data.id is string && request.resource.data.at is string &&
           request.resource.data.rate is number && request.resource.data.rate > 0 &&
           request.resource.data.currency is string && request.resource.data.closed is bool && request.resource.data.countRevision is int &&
           request.resource.data.productIds is list && request.resource.data.productIds.size() <= 400;
-        allow update: if member(store) && resource.data.closed == false &&
+        allow update: if countAllowed(store) && resource.data.closed == false &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['countRevision']) &&
           request.resource.data.countRevision == resource.data.countRevision + 1;
       }
       match /stockCounts/{product} {
-        allow read: if member(store);
-        allow create, update: if member(store) &&
+        allow read: if can(store, 'viewStocktake');
+        allow create, update: if countAllowed(store) &&
           request.resource.data.keys().hasOnly(['sessionId', 'count', 'updatedBy', 'at', 'countRevision']) &&
           request.resource.data.updatedBy == request.auth.uid && nonnegative(request.resource.data.count) &&
           request.resource.data.at == request.time &&
@@ -92,7 +159,7 @@ service cloud.firestore {
             get(/databases/$(database)/documents/stores/$(store)/stocktakes/active).data.countRevision + 1;
       }
       match /stocktakeCosts/active {
-        allow read: if owner(store);
+        allow read: if can(store, 'viewCost') && can(store, 'viewStocktake');
         allow create, update: if owner(store) && request.resource.data.keys().hasOnly(['sessionId', 'snapshot']) &&
           request.resource.data.sessionId is string && request.resource.data.snapshot is map;
       }

@@ -51,7 +51,7 @@ void main() {
     s.dispose(); reopened.dispose();
   });
   test('worker cannot modify pricing or restore backups', () async {
-    final s = await localStore(); s.demoRole(false);
+    final s = await localStore(); s.lockWorker();
     await expectLater(s.changeSettings(2, 20, 'ل.س'), throwsFormatException);
     await expectLater(s.saveProduct(s.products.first), throwsFormatException);
     await expectLater(s.restore({'schema': 1}), throwsFormatException);
@@ -59,9 +59,9 @@ void main() {
   });
   test('counting does not change inventory until owner approval', () async {
     final s = await localStore(); final p = s.products.first;
-    await s.startStocktake(); s.demoRole(false);
+    await s.setOwnerPassword('secret123'); await s.startStocktake(); s.lockWorker();
     await s.countProduct(p.id, 7); expect(s.findId(p.id)!.quantity, p.quantity);
-    s.demoRole(true); await s.approveStocktake();
+    await s.unlockOwner('secret123'); await s.approveStocktake();
     expect(s.findId(p.id)!.quantity, 7); expect(s.stocktake!.closed, true);
     await expectLater(s.countProduct(p.id, 8), throwsFormatException);
     s.dispose();

@@ -11,6 +11,21 @@ void main() {
     expect(fixed.price(const StoreSettings(rate: 12000)), 25000);
     expect(fixed.edit(automatic: true, settings: settings).price(settings), 24000);
   });
+  test('SYP costs and automatic selling prices do not follow the dollar rate', () {
+    final p = const Product(id: 's', name: 'محلي').edit(costCurrency: 'SYP', costLocal: 5000, settings: settings);
+    expect(p.costUsd, isNull); expect(p.localCost(10000), 5000);
+    expect(p.price(settings), 6000); expect(p.price(const StoreSettings(rate: 25000)), 6000);
+    final usd = p.edit(costCurrency: 'USD', costUsd: 2, settings: settings);
+    expect(usd.costLocal, isNull); expect(usd.price(settings), 24000);
+    expect(() => p.edit(costCurrency: 'USD', settings: settings), throwsFormatException);
+  });
+  test('mixed-currency stocktake values use the frozen USD rate and SYP costs', () {
+    final stock = Stocktake(id: 's', at: 'now', rate: 10000, currency: 'ل.س',
+      counts: const {'local': 3, 'usd': 2}, snapshot: const {
+        'local': {'costCurrency': 'SYP', 'costLocal': 5000}, 'usd': {'costUsd': 2},
+      });
+    expect(stock.value, 55000); expect(Stocktake.fromJson(stock.toJson()).value, 55000);
+  });
   test('a new product without cost remains unpriced', () {
     final p = const Product(id: 'p', name: 'جديد').edit(settings: settings);
     expect(p.ready, false);

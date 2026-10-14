@@ -8,6 +8,7 @@ import '../domain/models.dart';
 import 'common.dart';
 import 'scanner.dart';
 import 'product_editor.dart';
+import 'access_settings.dart';
 
 class Home extends StatefulWidget {
   final AppStore store;
@@ -33,6 +34,7 @@ class _HomeState extends State<Home> {
     (category == 'الكل' || p.category == category) &&
     (p.name.toLowerCase().contains(search.text.trim().toLowerCase()) || p.barcode.contains(search.text.trim()))).toList();
   void addToCart(Product p) {
+    if (!s.can('useCalculator')) { return; }
     if (!p.ready) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('المادة تحتاج تسعيراً أولاً'))); return; }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -47,7 +49,7 @@ class _HomeState extends State<Home> {
     if (!mounted || code == null) { return; }
     final p = s.findBarcode(code);
     if (p == null) {
-      if (s.owner && await confirm(context, 'باركود جديد', 'هذا الباركود غير موجود. هل تريد إضافة مادته؟')) {
+      if (s.can('addProduct') && await confirm(context, 'باركود جديد', 'هذا الباركود غير موجود. هل تريد إضافة مادته؟')) {
         if (mounted) { await editProduct(context, s, barcode: code); }
       } else if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الباركود غير موجود في المواد'))); }
       return;
@@ -57,6 +59,7 @@ class _HomeState extends State<Home> {
     else { setState(() { tab = 0; category = 'الكل'; search.text = p.barcode; }); }
   }
   Future<void> count(Product p) async {
+    if (!s.can('viewStocktake') || !s.can('countStock')) { return; }
     final value = await numberDialog('جرد: ${p.name}', 'عدد القطع الفعلي', initial: s.stocktake?.counts[p.id]);
     if (value != null && mounted) { await action(() => s.countProduct(p.id, value), 'تم تسجيل العدد الفعلي'); }
   }
@@ -113,8 +116,8 @@ class _HomeState extends State<Home> {
     child: Row(children: [Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('سعر صرف الدولار', style: TextStyle(color: Colors.white70)), const SizedBox(height: 6),
       Text('${money(s.settings.rate)} ${s.settings.currency}', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-      Text('${s.products.length} مادة • ربح عام ${money(s.settings.margin)}%', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-    ])), if (s.owner) IconButton.filledTonal(tooltip: 'تعديل الصرف', onPressed: busy ? null : () async {
+      Text('${s.products.length} مادة${s.can('viewCost') ? ' • ربح عام ${money(s.settings.margin)}%' : ''}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+    ])), if (s.can('editExchangeRate')) IconButton.filledTonal(tooltip: 'تعديل الصرف', onPressed: busy ? null : () async {
       final n = await numberDialog('سعر صرف الدولار', 'السعر الجديد', initial: s.settings.rate);
       if (n != null && mounted && await confirm(context, 'تحديث الأسعار التلقائية', 'تتغير الأسعار التلقائية وفق الصرف ${money(n)}. الأسعار الثابتة تبقى كما هي.')) {
         await action(() => s.changeSettings(n, s.settings.margin, s.settings.currency), 'تم تحديث الصرف والأسعار التلقائية');
@@ -135,7 +138,7 @@ class _HomeState extends State<Home> {
       Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Row(children: [
         Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: categories.map((c) => Padding(
           padding: const EdgeInsetsDirectional.only(end: 6), child: ChoiceChip(label: Text(c), selected: category == c, onSelected: (_) => setState(() => category = c)))).toList()))),
-        if (s.owner) FilledButton.tonalIcon(onPressed: busy ? null : () => editProduct(context, s), icon: const Icon(Icons.add), label: const Text('مادة')),
+        if (s.can('addProduct')) FilledButton.tonalIcon(onPressed: busy ? null : () => editProduct(context, s), icon: const Icon(Icons.add), label: const Text('مادة')),
       ])),
       if (s.owner && selected.isNotEmpty) Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Row(children: [
         Text('${selected.length} محددة'), const Spacer(), TextButton(onPressed: () => setState(selected.clear), child: const Text('إلغاء')),
@@ -148,19 +151,23 @@ class _HomeState extends State<Home> {
               if (!selected.add(p.id)) { selected.remove(p.id); }
             })) : const Icon(Icons.inventory_2_outlined),
             title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Padding(padding: const EdgeInsets.only(top: 6), child: Text('${p.category} • ${money(p.quantity)} قطعة • الكرتونة ${p.pack}\n${p.manualPrice == null ? 'سعر تلقائي' : 'سعر ثابت'}${s.owner && p.costUsd != null ? ' • تكلفة \$${money(p.costUsd!)}' : ''}')),
+            subtitle: Padding(padding: const EdgeInsets.only(top: 6), child: Text('${p.category} • ${money(p.quantity)} قطعة • الكرتونة ${p.pack}\n${p.manualPrice == null ? 'سعر تلقائي' : 'سعر ثابت'}${s.can('viewCost') && p.hasCost ? ' • تكلفة القطعة ${money(p.costCurrency == 'SYP' ? p.costLocal! : p.costUsd!)} ${p.costCurrency == 'SYP' ? 'ل.س' : '\$'}' : ''}')),
             isThreeLine: true,
             trailing: Text(p.ready ? '${money(p.price(s.settings))}\n${s.settings.currency}' : 'يحتاج\nتسعيراً', textAlign: TextAlign.center,
               style: TextStyle(color: p.ready ? Theme.of(context).colorScheme.primary : Colors.orange.shade800, fontWeight: FontWeight.bold)),
-            onTap: busy ? null : () { if (s.owner) { editProduct(context, s, product: p); } else { productDetails(p); } },
+            onTap: busy ? null : () { if (s.canEditProduct || s.can('deleteProduct')) { editProduct(context, s, product: p); } else { productDetails(p); } },
           ));
         })),
       if (s.owner && rows.isNotEmpty) TextButton(onPressed: () => setState(() => selected.addAll(rows.map((p) => p.id))), child: const Text('تحديد جميع نتائج البحث')),
     ]);
   }
-  Future<void> productDetails(Product p) => showDialog(context: context, builder: (ctx) => AlertDialog(title: Text(p.name),
-    content: Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${p.pack} قطعة\nالمتوفر: ${money(p.quantity)} قطعة\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}'),
-    actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))]));
+  Future<void> productDetails(Product product) => showDialog(context: context, builder: (ctx) =>
+    ListenableBuilder(listenable: s, builder: (ctx, _) {
+      final p = s.findId(product.id);
+      return AlertDialog(title: Text(p?.name ?? 'الصنف محذوف'),
+        content: p == null ? null : Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${p.pack} قطعة\nالمتوفر: ${money(p.quantity)} قطعة\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}${s.can('viewCost') && p.hasCost ? '\nتكلفة القطعة: ${money(p.localCost(s.settings.rate)!)} ل.س\nالربح: ${money(p.effectiveMargin(s.settings))}%' : ''}'),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))]);
+    }));
 
   Future<void> bulk() async {
     final rows = s.products.where((p) => selected.contains(p.id)).toList();
@@ -173,7 +180,7 @@ class _HomeState extends State<Home> {
     }
   }
 
-  Widget basket() => Column(children: [
+  Widget basket() => !s.can('useCalculator') ? const EmptyState('حساب الزبون مقفل', 'اطلب من صاحب المحل تفعيل الصلاحية.') : Column(children: [
     const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4), child: Align(alignment: AlignmentDirectional.centerStart,
       child: Text('حساب الزبون', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)))),
     const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('امسح المادة، أو ابحث واضغط لإضافتها. السلة لا تخصم المخزون.')),
@@ -215,6 +222,7 @@ class _HomeState extends State<Home> {
   ]);
 
   Widget inventory() {
+    if (!s.can('viewStocktake')) { return const EmptyState('الجرد مقفل', 'اطلب من صاحب المحل تفعيل الصلاحية.'); }
     final stock = s.stocktake;
     final rows = filtered.where((p) => stock?.productIds.contains(p.id) ?? false).toList();
     return Column(children: [
@@ -228,14 +236,14 @@ class _HomeState extends State<Home> {
           final p = rows[i]; final actual = stock.counts[p.id];
           return Card(child: ListTile(title: Text(p.name), subtitle: Text('المسجل: ${money(p.quantity)} قطعة${actual == null ? '' : ' • الفرق: ${money(actual - p.quantity)}'}'),
             trailing: Text(actual == null ? 'لم يُعدّ' : '${money(actual)} قطعة', style: TextStyle(color: actual == null ? Colors.blueGrey : const Color(0xff237b66), fontWeight: FontWeight.bold)),
-            onTap: busy || stock.closed ? null : () => count(p)));
+            onTap: busy || stock.closed || !s.can('countStock') ? null : () => count(p)));
         })),
-        if (s.owner) Container(padding: const EdgeInsets.all(16), color: const Color(0xffe3eef9), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (s.can('viewCost')) Container(padding: const EdgeInsets.all(16), color: const Color(0xffe3eef9), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('قيمة المعدود: ${money(stock.value)} ${stock.currency}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           const Text('المواد غير المعدودة أو دون تكلفة لا تدخل في المجموع. الاعتماد يحدّث المواد المعدودة فقط.', style: TextStyle(fontSize: 12)),
           Wrap(spacing: 8, children: [
-            OutlinedButton.icon(onPressed: busy ? null : () => action(() => StoreFiles.shareBytes(StoreFiles.stockExcel(stock), 'raff-stocktake.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'تقرير الجرد جاهز للمشاركة'), icon: const Icon(Icons.file_download_outlined), label: const Text('تقرير Excel')),
-            if (!stock.closed) FilledButton(onPressed: busy ? null : () async {
+            if (s.owner) OutlinedButton.icon(onPressed: busy ? null : () => action(() => StoreFiles.shareBytes(StoreFiles.stockExcel(stock), 'raff-stocktake.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'تقرير الجرد جاهز للمشاركة'), icon: const Icon(Icons.file_download_outlined), label: const Text('تقرير Excel')),
+            if (s.owner && !stock.closed) FilledButton(onPressed: busy ? null : () async {
               if (await confirm(context, 'اعتماد الجرد', 'تحديث المخزون لأعداد ${stock.counts.length} مادة معدودة، وإغلاق الجلسة؟')) { await action(s.approveStocktake, 'تم اعتماد الجرد وتحديث الكميات'); }
             }, child: const Text('اعتماد الجرد')),
           ]),
@@ -248,10 +256,25 @@ class _HomeState extends State<Home> {
     const Text('إعدادات المحل', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
     const SizedBox(height: 10), Text('${s.actor} • ${s.owner ? 'صاحب المحل' : 'عامل'}'),
     if (!s.cloud) Card(color: const Color(0xfffff2d9), child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
-      const Text('وضع تجريبي: البيانات على هذا الجهاز فقط. تبديل الدور هنا للمعاينة، ويختفي عند تفعيل Firebase.'),
-      SwitchListTile(title: const Text('تجربة واجهة صاحب المحل'), value: s.owner, onChanged: (v) { cart.clear(); selected.clear(); s.demoRole(v); }),
+      const Text('البيانات على هذا الجهاز. الرجوع إلى وضع المدير يحتاج كلمة سره، ويبدأ التطبيق بوضع العامل بعد إغلاقه إذا كانت كلمة السر محددة.'),
+      ListTile(leading: Icon(s.owner ? Icons.lock_outline : Icons.lock_open), title: Text(s.owner ? 'قفل التطبيق بوضع العامل' : 'الدخول كصاحب المحل'),
+        onTap: busy ? null : () async {
+          if (s.owner) {
+            if (!s.hasOwnerPassword) {
+              final password = await passwordDialog(context, create: true);
+              if (password == null || !mounted) { return; }
+              await action(() => s.setOwnerPassword(password), 'تم تعيين كلمة السر');
+              if (!s.hasOwnerPassword) { return; }
+            }
+            cart.clear(); selected.clear(); s.lockWorker();
+          } else {
+            final password = await passwordDialog(context);
+            if (password != null && mounted) { await action(() => s.unlockOwner(password), 'تم فتح وضع المدير'); }
+          }
+        }),
     ]))),
     if (s.owner) ...[
+      Card(child: ListTile(leading: const Icon(Icons.admin_panel_settings_outlined), title: const Text('صلاحيات العامل وكلمة السر'), subtitle: const Text('ما يستطيع رؤيته وإضافته وحذفه وتعديله'), onTap: busy ? null : () => openWorkerAccess(context, s))),
       Card(child: Column(children: [
         ListTile(leading: const Icon(Icons.percent), title: const Text('نسبة الربح العامة'), subtitle: Text('${money(s.settings.margin)}% زيادة على التكلفة'), trailing: const Icon(Icons.chevron_left), onTap: busy ? null : () async {
           final n = await numberDialog('الربح العام', 'النسبة %', initial: s.settings.margin);
@@ -266,14 +289,17 @@ class _HomeState extends State<Home> {
         ListTile(leading: const Icon(Icons.backup_outlined), title: const Text('تنزيل نسخة احتياطية'), subtitle: const Text('مواد وإعدادات وآخر سجل أسعار والجرد الحالي'), onTap: busy ? null : () => action(() => StoreFiles.shareJson(s.backup()), 'النسخة جاهزة. احفظها في مكان آمن')),
         ListTile(leading: const Icon(Icons.restore), title: const Text('استرجاع نسخة احتياطية'), subtitle: Text(s.cloud ? 'دمج المواد والإعدادات؛ دون حذف المواد الأخرى أو تغيير المستخدمين' : 'استبدال البيانات التجريبية المحلية'), onTap: busy ? null : restore),
       ])),
+    ],
+    if (s.can('viewHistory')) ...[
       const SizedBox(height: 12), const Text('آخر تغيّرات الأسعار', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
       if (s.history.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('تظهر تغيّرات الأسعار هنا بعد أول تعديل.')),
       ...s.history.take(30).map((h) => Card(child: ListTile(leading: Icon(h.after >= h.before ? Icons.trending_up : Icons.trending_down,
         color: h.after >= h.before ? const Color(0xffad7350) : const Color(0xff237b66)), title: Text(h.name),
         subtitle: Text('${h.kind} • ${h.actor}\n${h.at.replaceFirst('T', ' ').split('.').first} UTC'),
         trailing: Text('${money(h.before)}\n↓ ${money(h.after)}')))),
-    ] else const Padding(padding: EdgeInsets.all(24), child: Text('إدارة الصرف والأسعار والملفات متاحة لصاحب المحل. يمكنك البحث وحساب الزبون وإدخال أعداد الجرد.')),
-    const SizedBox(height: 24), const Center(child: Text('رفّ • نسخة أولية 0.1.1', style: TextStyle(color: Colors.blueGrey))),
+    ],
+    if (!s.owner) const Padding(padding: EdgeInsets.all(24), child: Text('الميزات المتاحة تحددها صلاحياتك. اطلب من صاحب المحل تغييرها عند الحاجة.')),
+    const SizedBox(height: 24), const Center(child: Text('رفّ • نسخة أولية 0.2.0', style: TextStyle(color: Colors.blueGrey))),
   ]);
 
   Future<void> currencyDialog() async {

@@ -23,40 +23,56 @@ class Product {
   final String id, name, category, barcode;
   final int pack, revision;
   final double quantity, saleBaseUsd;
-  final double? costUsd, margin, manualPrice;
+  final double? saleBaseLocal;
+  final String costCurrency;
+  final double? costUsd, costLocal, margin, manualPrice;
   final bool ready;
   const Product({required this.id, required this.name, this.category = 'عام',
     this.barcode = '', this.pack = 1, this.quantity = 0,
-    this.saleBaseUsd = 0, this.costUsd, this.margin, this.manualPrice,
+    this.saleBaseUsd = 0, this.saleBaseLocal, this.costCurrency = 'USD',
+    this.costUsd, this.costLocal, this.margin, this.manualPrice,
     this.ready = false, this.revision = 0});
   factory Product.fromJson(String id, Json j, [Json? pricing]) => Product(
     id: id, name: j['name'] as String? ?? '',
     category: j['category'] as String? ?? 'عام', barcode: j['barcode'] as String? ?? '',
     pack: (j['pack'] as num?)?.toInt() ?? 1,
     quantity: number(j['quantity']), saleBaseUsd: number(j['saleBaseUsd']),
+    saleBaseLocal: j['saleBaseLocal'] == null ? null : number(j['saleBaseLocal']),
+    costCurrency: j['costCurrency'] as String? ?? 'USD',
+    costLocal: pricing?['costLocal'] == null ? null : number(pricing?['costLocal']),
     costUsd: pricing?['costUsd'] == null ? null : number(pricing?['costUsd']),
     margin: pricing?['margin'] == null ? null : number(pricing?['margin']),
     manualPrice: j['manualPrice'] == null ? null : number(j['manualPrice']),
     ready: j['ready'] == true, revision: (j['revision'] as num?)?.toInt() ?? 0);
   Json toJson() => {'name': name, 'category': category, 'barcode': barcode,
     'pack': pack, 'quantity': quantity, 'saleBaseUsd': saleBaseUsd,
+    'saleBaseLocal': saleBaseLocal, 'costCurrency': costCurrency,
     'manualPrice': manualPrice, 'ready': ready, 'revision': revision};
-  Json pricingJson() => {'costUsd': costUsd, 'margin': margin};
-  double price(StoreSettings settings) => manualPrice ?? saleBaseUsd * settings.rate;
+  Json pricingJson() => {'costUsd': costUsd, 'costLocal': costLocal, 'margin': margin};
+  double price(StoreSettings settings) => manualPrice ?? (costCurrency == 'SYP' ? saleBaseLocal ?? 0 : saleBaseUsd * settings.rate);
+  bool get hasCost => costCurrency == 'SYP' ? costLocal != null : costUsd != null;
+  double? localCost(double rate) => costCurrency == 'SYP' ? costLocal : (costUsd == null ? null : costUsd! * rate);
   double effectiveMargin(StoreSettings settings) => margin ?? settings.margin;
   Product edit({String? name, String? category, String? barcode, int? pack,
-    double? quantity, double? costUsd, double? margin, double? manualPrice,
+    double? quantity, double? costUsd, double? costLocal, String? costCurrency, double? margin, double? manualPrice,
     bool useGeneralMargin = false, bool automatic = false,
     required StoreSettings settings}) {
-    final cost = costUsd ?? this.costUsd;
+    final currency = costCurrency ?? this.costCurrency;
+    final switched = currency != this.costCurrency;
+    final usd = currency == 'USD' ? costUsd ?? (switched ? null : this.costUsd) : null;
+    final local = currency == 'SYP' ? costLocal ?? (switched ? null : this.costLocal) : null;
+    final cost = currency == 'SYP' ? local : usd;
+    final reprice = switched || costUsd != null || costLocal != null || margin != null || useGeneralMargin;
+    if (switched && cost == null) { throw const FormatException('أدخل التكلفة عند تغيير عملتها.'); }
     final profit = useGeneralMargin ? null : (margin ?? this.margin);
     final manual = automatic ? null : (manualPrice ?? this.manualPrice);
     return Product(id: id, name: name ?? this.name,
       category: category ?? this.category, barcode: barcode ?? this.barcode,
       pack: pack ?? this.pack, quantity: quantity ?? this.quantity,
-      costUsd: cost, margin: profit, manualPrice: manual,
-      saleBaseUsd: cost == null ? saleBaseUsd : cost * (1 + (profit ?? settings.margin) / 100),
-      ready: manual != null || cost != null, revision: revision + 1);
+      costUsd: usd, costLocal: local, costCurrency: currency, margin: profit, manualPrice: manual,
+      saleBaseUsd: currency == 'USD' ? (usd == null || !reprice ? saleBaseUsd : usd * (1 + (profit ?? settings.margin) / 100)) : 0,
+      saleBaseLocal: currency == 'SYP' ? (local == null || !reprice ? saleBaseLocal : local * (1 + (profit ?? settings.margin) / 100)) : null,
+      ready: manual != null || cost != null || (!switched && ready), revision: revision + 1);
   }
   void validate() {
     if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id) ||
@@ -65,6 +81,10 @@ class Product {
         (costUsd != null && (costUsd! < 0 || !costUsd!.isFinite)) ||
         (margin != null && (margin! < 0 || !margin!.isFinite)) ||
         (manualPrice != null && (manualPrice! < 0 || !manualPrice!.isFinite)) ||
+        !['USD', 'SYP'].contains(costCurrency) ||
+        (costCurrency == 'SYP' && costUsd != null) || (costCurrency == 'USD' && costLocal != null) ||
+        (costLocal != null && (costLocal! < 0 || !costLocal!.isFinite)) ||
+        (saleBaseLocal != null && (saleBaseLocal! < 0 || !saleBaseLocal!.isFinite)) ||
         saleBaseUsd < 0 || !saleBaseUsd.isFinite) {
       throw const FormatException('تأكد من الاسم والأرقام غير السالبة والتعبئة.');
     }
@@ -104,7 +124,7 @@ class Stocktake {
     required this.currency, this.closed = false, this.countRevision = 0, this.productIds = const [], this.counts = const {},
     this.snapshot = const {}});
   double get value => counts.entries.fold(0, (sum, e) => sum +
-    e.value * number(snapshot[e.key]?['costUsd']) * rate);
+    e.value * snapshotCost(snapshot[e.key] ?? {}, rate));
   Json toJson() => {'id': id, 'at': at, 'rate': rate, 'currency': currency,
     'closed': closed, 'countRevision': countRevision, 'productIds': productIds, 'counts': counts, 'snapshot': snapshot};
   factory Stocktake.fromJson(Json j) => Stocktake(id: j['id'], at: j['at'],
@@ -114,3 +134,7 @@ class Stocktake {
     counts: Map<String, dynamic>.from(j['counts'] ?? {}).map((k, v) => MapEntry(k, number(v))),
     snapshot: Map<String, dynamic>.from(j['snapshot'] ?? {}).map((k, v) => MapEntry(k, Json.from(v))));
 }
+
+// Old snapshots have no currency field and remain dollar-based.
+double snapshotCost(Json row, double rate) => row['costCurrency'] == 'SYP'
+  ? number(row['costLocal']) : number(row['costUsd']) * rate;

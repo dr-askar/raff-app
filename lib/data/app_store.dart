@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../domain/models.dart';
+import '../domain/worker_access.dart';
+import 'owner_lock.dart';
 
 class ImportResult {
   final int added, updated;
@@ -34,6 +36,70 @@ class AppStore extends ChangeNotifier {
   Stocktake? stocktake;
   bool owner = true, fromCache = false, pending = false, loaded = false;
   String actor = 'صاحب المحل', error = '';
+  WorkerAccess workerAccess = const WorkerAccess();
+  late final OwnerLock ownerLock = OwnerLock(prefs);
+  DateTime? _adminUntil, _retryAfter;
+  int _passwordFailures = 0;
+  bool can(String permission) => usable && (owner || workerAccess.allows(permission));
+  bool get canEditProduct => owner || ['editDetails', 'editQuantity', 'editSalePrice', 'editCost'].any(can);
+  bool get hasOwnerPassword => cloud || ownerLock.configured;
+  void _require(bool allowed) {
+    if (!allowed || !usable) { throw const FormatException('صاحب المحل لم يمنحك صلاحية هذه العملية.'); }
+  }
+  Future<void> authenticateOwner(String password) async {
+    if (_retryAfter != null && DateTime.now().isBefore(_retryAfter!)) {
+      throw const FormatException('انتظر دقيقة قبل إعادة محاولة كلمة السر.');
+    }
+    var valid = false;
+    if (cloud) {
+      _requireOwner();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user?.email != null) {
+        try { await user!.reauthenticateWithCredential(EmailAuthProvider.credential(email: user.email!, password: password)); valid = true; }
+        on FirebaseAuthException catch (_) { valid = false; }
+      }
+    } else { valid = await ownerLock.verify(password); }
+    if (!valid) {
+      if (++_passwordFailures >= 5) { _retryAfter = DateTime.now().add(const Duration(minutes: 1)); _passwordFailures = 0; }
+      throw const FormatException('كلمة السر غير صحيحة.');
+    }
+    _passwordFailures = 0; _retryAfter = null;
+    _adminUntil = DateTime.now().add(const Duration(minutes: 5));
+  }
+  void _requireAdmin() {
+    _requireOwner();
+    if (_adminUntil == null || !DateTime.now().isBefore(_adminUntil!)) {
+      throw const FormatException('أعد فتح إعدادات الصلاحيات بكلمة سر المدير.');
+    }
+  }
+  Future<void> setOwnerPassword(String password) async {
+    _requireOwner();
+    if (cloud) { throw const FormatException('كلمة مرور المدير السحابي هي كلمة مرور حسابه.'); }
+    if (ownerLock.configured) { _requireAdmin(); }
+    await ownerLock.set(password); _adminUntil = DateTime.now().add(const Duration(minutes: 5)); notifyListeners();
+  }
+  void lockWorker() {
+    if (cloud) { return; }
+    owner = false; actor = 'العامل'; _adminUntil = null; notifyListeners();
+  }
+  Future<void> unlockOwner(String password) async {
+    if (cloud) { throw const FormatException('سجل الدخول بحساب صاحب المحل.'); }
+    await authenticateOwner(password); owner = true; actor = 'صاحب المحل'; notifyListeners();
+  }
+  Future<List<Json>> workers() async {
+    _requireAdmin();
+    if (!cloud) { return [{'id': 'local', 'name': 'العامل على هذا الجهاز', 'permissions': workerAccess.toJson()}]; }
+    final docs = await root.collection('members').where('role', isEqualTo: 'worker').get();
+    return docs.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+  }
+  Future<void> setWorkerAccess(String workerId, WorkerAccess access) async {
+    _requireAdmin();
+    if (cloud) { await root.collection('members').doc(workerId).update({'permissions': access.toJson()}); }
+    else {
+      if (!await prefs.setString('raff.worker.access.v1', jsonEncode(access.toJson()))) { throw const FormatException('تعذر حفظ الصلاحيات.'); }
+      workerAccess = access; notifyListeners();
+    }
+  }
   String? uid;
   DocumentReference<Json> get root => FirebaseFirestore.instance.collection('stores').doc(storeId);
   bool get usable => !cloud || uid != null;
@@ -56,25 +122,34 @@ class AppStore extends ChangeNotifier {
       ];
       await _persist();
     }
+    workerAccess = WorkerAccess.fromJson(Json.from(jsonDecode(prefs.getString('raff.worker.access.v1') ?? '{}')));
+    if (ownerLock.configured) { owner = false; actor = 'العامل'; }
     loaded = true;
     notifyListeners();
   }
 
   Future<void> connect(User user) async {
     await disconnect();
-    final member = await root.collection('members').doc(user.uid).get();
+    final member = await root.collection('members').doc(user.uid).get(const GetOptions(source: Source.server));
     final data = member.data();
     if (data == null || data['active'] != true || !['owner', 'worker'].contains(data['role'])) {
       throw const FormatException('الحساب غير مضاف للمحل. اطلب من صاحب المحل تفعيل حسابك.');
     }
     uid = user.uid;
     owner = data['role'] == 'owner';
+    workerAccess = WorkerAccess.fromJson(Json.from(data['permissions'] ?? {}));
     actor = data['name'] as String? ?? user.email ?? 'مستخدم';
     error = '';
     _watch(root.collection('members').doc(user.uid).snapshots(), (snap) {
       final m = snap.data();
       if (m == null || m['active'] != true || (m['role'] == 'owner') != owner) {
+        _pricing.clear(); _stockCosts = null; history = []; _rebuild(); _rebuildStock();
         unawaited(FirebaseAuth.instance.signOut());
+      } else if (!owner && jsonEncode(workerAccess.toJson()) != jsonEncode(WorkerAccess.fromJson(Json.from(m['permissions'] ?? {})).toJson())) {
+        // Clear sensitive state immediately, then resubscribe with the new access.
+        workerAccess = WorkerAccess.fromJson(Json.from(m['permissions'] ?? {}));
+        _pricing.clear(); _stockCosts = null; history = []; stocktake = null; _rebuild(); loaded = false;
+        unawaited(connect(user).catchError((Object e) { error = 'تعذر تحديث الصلاحيات. أعد تسجيل الدخول.'; notifyListeners(); }));
       }
     });
     _watch(root.collection('settings').doc('current').snapshots(includeMetadataChanges: true), (snap) {
@@ -90,30 +165,39 @@ class AppStore extends ChangeNotifier {
       _productsReady = true; _setLoaded();
       _metadata('products', snap.metadata);
     });
-    if (owner) {
+    if (can('viewCost')) {
       _watch(root.collection('pricing').snapshots(includeMetadataChanges: true), (snap) {
+        if (!can('viewCost')) { return; }
         _pricing.clear();
         for (final doc in snap.docs) { _pricing[doc.id] = doc.data(); }
         _rebuild();
         _pricingReady = true; _setLoaded();
         _metadata('pricing', snap.metadata);
       });
+    }
+    if (can('viewHistory')) {
       _watch(root.collection('priceChanges').orderBy('at', descending: true).limit(100).snapshots(), (snap) {
+        if (!can('viewHistory')) { return; }
         history = snap.docs.map((d) => PriceChange.fromJson(d.data())).toList();
       });
     }
+    if (can('viewStocktake')) {
     _watch(root.collection('stocktakes').doc('active').snapshots(), (snap) {
+      if (!can('viewStocktake')) { return; }
       _stockMeta = snap.data(); _rebuildStock();
     });
     _watch(root.collection('stockCounts').snapshots(includeMetadataChanges: true), (snap) {
+      if (!can('viewStocktake')) { return; }
       _stockCounts.clear();
       for (final doc in snap.docs) { _stockCounts[doc.id] = doc.data(); }
       _rebuildStock(); _metadata('counts', snap.metadata);
     });
-    if (owner) {
+    if (can('viewCost')) {
       _watch(root.collection('stocktakeCosts').doc('active').snapshots(), (snap) {
+        if (!can('viewCost') || !can('viewStocktake')) { return; }
         _stockCosts = snap.data(); _rebuildStock();
       });
+    }
     }
     notifyListeners();
   }
@@ -132,7 +216,7 @@ class AppStore extends ChangeNotifier {
     fromCache = _metadataSources.values.any((m) => m.isFromCache);
     pending = _metadataSources.values.any((m) => m.hasPendingWrites);
   }
-  void _setLoaded() { loaded = _productsReady && _settingsReady && (!owner || _pricingReady); }
+  void _setLoaded() { loaded = _productsReady && _settingsReady && (!can('viewCost') || _pricingReady); }
   void _rebuildStock() {
     final j = _stockMeta;
     if (j == null) { stocktake = null; return; }
@@ -143,7 +227,7 @@ class AppStore extends ChangeNotifier {
     final revisions = _stockCounts.values.where((c) => c['sessionId'] == j['id']).map((c) => number(c['countRevision']).toInt());
     final latest = revisions.fold<int>(0, (a, b) => a > b ? a : b);
     _stockReady = latest == stocktake!.countRevision &&
-      (!owner || _stockCosts?['sessionId'] == j['id']);
+      (!can('viewCost') || _stockCosts?['sessionId'] == j['id']);
   }
   void _rebuild() {
     products = _public.entries.map((e) => Product.fromJson(e.key, e.value, _pricing[e.key])).toList()
@@ -153,7 +237,7 @@ class AppStore extends ChangeNotifier {
     for (final s in _subscriptions) { await s.cancel(); }
     _subscriptions.clear();
     if (cloud) {
-      products = []; history = []; _public.clear(); _pricing.clear();
+      _adminUntil = null; products = []; history = []; _public.clear(); _pricing.clear();
       stocktake = null; owner = false; loaded = false; uid = null;
       settings = const StoreSettings();
       _stockMeta = null; _stockCosts = null; _stockCounts.clear(); _metadataSources.clear();
@@ -165,7 +249,6 @@ class AppStore extends ChangeNotifier {
   void _requireOwner() {
     if (!owner || !usable) { throw const FormatException('هذه العملية متاحة لصاحب المحل فقط.'); }
   }
-  void demoRole(bool isOwner) { if (!cloud) { owner = isOwner; actor = owner ? 'صاحب المحل' : 'عامل تجريبي'; notifyListeners(); } }
   Product? findBarcode(String code) {
     for (final p in products) { if (p.barcode == code.trim()) { return p; } }
     return null;
@@ -181,9 +264,18 @@ class AppStore extends ChangeNotifier {
       at: DateTime.now().toUtc().toIso8601String(), before: before, after: after);
 
   Future<void> saveProduct(Product product, {int? expectedRevision}) async {
-    _requireOwner(); product.validate();
+    product.validate();
     final baseSettings = settings;
     final old = findId(product.id);
+    _require(old == null ? can('addProduct') : canEditProduct);
+    if (!owner) {
+      final base = old ?? Product(id: product.id, name: product.name);
+      if (old != null && !can('editDetails') && (product.name != base.name || product.category != base.category || product.barcode != base.barcode || product.pack != base.pack)) { _require(false); }
+      if (!can('editQuantity') && product.quantity != base.quantity) { _require(false); }
+      if (!can('editSalePrice') && product.manualPrice != base.manualPrice) { _require(false); }
+      if (!can('editSalePrice') && !can('editCost') && product.ready != base.ready) { _require(false); }
+      if (!can('editCost') && (jsonEncode(product.pricingJson()) != jsonEncode(base.pricingJson()) || product.costCurrency != base.costCurrency || product.saleBaseUsd != base.saleBaseUsd || product.saleBaseLocal != base.saleBaseLocal)) { _require(false); }
+    }
     if (old != null && expectedRevision != null && old.revision != expectedRevision) {
       throw const FormatException('تعدلت المادة. افتحها مجدداً قبل الحفظ.');
     }
@@ -200,7 +292,8 @@ class AppStore extends ChangeNotifier {
         if (current.exists && current.data()?['revision'] != (expectedRevision ?? old?.revision)) {
           throw const FormatException('تعدلت المادة على جهاز آخر. افتحها مجدداً قبل الحفظ.');
         }
-        if (product.barcode.isNotEmpty) {
+        final previousBarcode = current.data()?['barcode'] as String? ?? '';
+        if (product.barcode.isNotEmpty && previousBarcode != product.barcode) {
           final code = await tx.get(_barcode(product.barcode));
           if (code.exists && code.data()?['productId'] != product.id) {
             throw const FormatException('هذا الباركود مستخدم لمادة أخرى.');
@@ -210,11 +303,10 @@ class AppStore extends ChangeNotifier {
         if (settingsDoc.exists && settingsDoc.data()?['revision'] != baseSettings.revision) {
           throw const FormatException('تغيرت إعدادات الأسعار. حاول مجدداً.');
         }
-        final previousBarcode = current.data()?['barcode'] as String? ?? '';
         if (previousBarcode.isNotEmpty && previousBarcode != product.barcode) { tx.delete(_barcode(previousBarcode)); }
-        if (product.barcode.isNotEmpty) { tx.set(_barcode(product.barcode), {'productId': product.id}); }
+        if (product.barcode.isNotEmpty && previousBarcode != product.barcode) { tx.set(_barcode(product.barcode), {'productId': product.id}); }
         tx.set(ref, {...product.toJson(), 'updatedBy': uid, 'updatedAt': FieldValue.serverTimestamp()});
-        tx.set(root.collection('pricing').doc(product.id), product.pricingJson());
+        if (can('editCost')) { tx.set(root.collection('pricing').doc(product.id), product.pricingJson()); }
         tx.set(root.collection('priceChanges').doc(), {...change.toJson(), 'uid': uid});
       });
       _public[product.id] = product.toJson(); _pricing[product.id] = product.pricingJson();
@@ -224,6 +316,30 @@ class AppStore extends ChangeNotifier {
       history.insert(0, change);
       await _persist(); notifyListeners();
     }
+  }
+
+  Future<void> deleteProduct(Product product) async {
+    _require(can('deleteProduct'));
+    final current = findId(product.id);
+    if (current == null || current.revision != product.revision) { throw const FormatException('تغيرت المادة؛ أعد فتحها قبل الحذف.'); }
+    if (stocktake != null && !stocktake!.closed && stocktake!.productIds.contains(product.id)) {
+      throw const FormatException('اعتمد الجرد المفتوح قبل حذف هذه المادة.');
+    }
+    final change = _change(product.name, 'حذف مادة', product.price(settings), 0);
+    if (cloud) {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final ref = root.collection('products').doc(product.id);
+        final doc = await tx.get(ref);
+        final active = await tx.get(root.collection('stocktakes').doc('active'));
+        if (doc.data()?['revision'] != product.revision) { throw const FormatException('تغيرت المادة على جهاز آخر.'); }
+        if (active.data()?['closed'] == false && (active.data()?['productIds'] as List? ?? []).contains(product.id)) { throw const FormatException('المادة ضمن جرد مفتوح.'); }
+        tx.delete(ref); tx.delete(root.collection('pricing').doc(product.id));
+        if (product.barcode.isNotEmpty) { tx.delete(_barcode(product.barcode)); }
+        tx.set(root.collection('priceChanges').doc(), {...change.toJson(), 'uid': uid});
+      });
+      _public.remove(product.id); _pricing.remove(product.id); _rebuild();
+    } else { products.removeWhere((p) => p.id == product.id); history.insert(0, change); await _persist(); }
+    notifyListeners();
   }
 
   Future<ImportResult> importProducts(List<Product> rows, {required int settingsRevision}) async {
@@ -251,14 +367,15 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> changeSettings(double rate, double margin, String currency) async {
-    _requireOwner();
+    _require(can('editExchangeRate'));
+    if (!owner && (margin != settings.margin || currency != settings.currency)) { _require(false); }
     final previous = settings;
     if (!rate.isFinite || rate <= 0 || !margin.isFinite || margin < 0 || currency.trim().isEmpty) {
       throw const FormatException('أدخل سعر صرف موجباً وربحاً غير سالب واسم العملة.');
     }
     // General-margin changes reprice only automatic products following the general margin.
-    final changed = products.where((p) => p.margin == null && p.costUsd != null && p.manualPrice == null)
-      .map((p) => p.edit(settings: StoreSettings(rate: rate, margin: margin))).toList();
+    final changed = products.where((p) => p.margin == null && p.hasCost && p.manualPrice == null)
+      .map((p) => p.edit(useGeneralMargin: true, settings: StoreSettings(rate: rate, margin: margin))).toList();
     if (margin != previous.margin && changed.length > 140) { throw const FormatException('تعديل النسبة العامة يدعم حتى 140 مادة حالياً. عدّل على دفعات.'); }
     final next = StoreSettings(rate: rate, margin: margin, currency: currency.trim(), revision: previous.revision + 1);
     final rateChange = _change('سعر الصرف', 'تغيير الصرف', previous.rate, rate);
@@ -325,7 +442,7 @@ class AppStore extends ChangeNotifier {
       rate: settings.rate, currency: settings.currency,
       productIds: products.map((p) => p.id).toList(),
       snapshot: {for (final p in products) p.id: {'name': p.name, 'barcode': p.barcode,
-        'quantity': p.quantity, 'costUsd': p.costUsd, 'pack': p.pack}});
+        'quantity': p.quantity, 'costUsd': p.costUsd, 'costLocal': p.costLocal, 'costCurrency': p.costCurrency, 'pack': p.pack}});
     if (products.length > 400) { throw const FormatException('الجرد الحالي يدعم حتى 400 مادة. يلزم تقسيم الجرد للمخزون الأكبر.'); }
     if (cloud) {
       await FirebaseFirestore.instance.runTransaction((tx) async {
@@ -338,6 +455,7 @@ class AppStore extends ChangeNotifier {
     } else { stocktake = s; await _persist(); notifyListeners(); }
   }
   Future<void> countProduct(String id, double count) async {
+    _require(can('countStock') && can('viewStocktake'));
     final s = stocktake;
     if (!usable || s == null || s.closed || count < 0 || !count.isFinite ||
         findId(id) == null || !s.productIds.contains(id)) {
