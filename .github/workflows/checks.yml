@@ -2,6 +2,7 @@ name: Checks and Android demo APK
 on: [push, pull_request, workflow_dispatch]
 jobs:
   flutter:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[publish-only]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -44,6 +45,7 @@ jobs:
             gh release create "$RAFF_TAG" "${RAFF_ASSETS[@]}" --target "$GITHUB_SHA" --prerelease --title "رفّ — نسخة تجريبية ${GITHUB_RUN_NUMBER}" --notes "APK واحد موحد لمعالجات ARM64 وARM 32 بت وx86_64. يلزم Android 7 أو أحدث. نسخة محلية لتجربة المواد والأسعار والباركود والجرد. المزامنة تحتاج إعداد Firebase للمحل. لم تختبر الكاميرا على هاتف حقيقي بعد."
           fi
   rules:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[publish-only]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
