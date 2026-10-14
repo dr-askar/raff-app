@@ -34,6 +34,7 @@ class _HomeState extends State<Home> {
     (p.name.toLowerCase().contains(search.text.trim().toLowerCase()) || p.barcode.contains(search.text.trim()))).toList();
   void addToCart(Product p) {
     if (!p.ready) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('المادة تحتاج تسعيراً أولاً'))); return; }
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       final i = cart.indexWhere((line) => line.id == p.id);
       if (i == -1) { cart.add(CartLine(id: p.id, name: p.name, unitPrice: p.price(s.settings))); }
@@ -80,6 +81,7 @@ class _HomeState extends State<Home> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (context, _) => Scaffold(
+    resizeToAvoidBottomInset: false,
     appBar: AppBar(title: Row(children: [
       Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(12)),
         child: const Icon(Icons.inventory_2_outlined, color: Colors.white)), const SizedBox(width: 10),
@@ -140,7 +142,7 @@ class _HomeState extends State<Home> {
         FilledButton.tonal(onPressed: busy ? null : bulk, child: const Text('تعديل الربح')),
       ])),
       Expanded(child: rows.isEmpty ? const EmptyState('لا توجد مواد', 'غيّر البحث أو أضف مادة جديدة.') : ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 20), itemCount: rows.length, itemBuilder: (context, i) {
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 20 + MediaQuery.viewInsetsOf(context).bottom), itemCount: rows.length, itemBuilder: (context, i) {
           final p = rows[i]; return Card(child: ListTile(contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             leading: s.owner ? Checkbox(value: selected.contains(p.id), onChanged: (_) => setState(() {
               if (!selected.add(p.id)) { selected.remove(p.id); }
@@ -222,7 +224,7 @@ class _HomeState extends State<Home> {
       else ...[
         Padding(padding: const EdgeInsets.symmetric(horizontal: 20), child: Text('${stock.closed ? 'جرد معتمد' : 'جرد مفتوح'} • تم عدّ ${stock.counts.length} مادة\nبدأ ${stock.at.split('T').first} • الصرف المثبت ${money(stock.rate)} ${stock.currency}')),
         searchBar(counting: true),
-        Expanded(child: ListView.builder(padding: const EdgeInsets.all(16), itemCount: rows.length, itemBuilder: (context, i) {
+        Expanded(child: ListView.builder(padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.viewInsetsOf(context).bottom), itemCount: rows.length, itemBuilder: (context, i) {
           final p = rows[i]; final actual = stock.counts[p.id];
           return Card(child: ListTile(title: Text(p.name), subtitle: Text('المسجل: ${money(p.quantity)} قطعة${actual == null ? '' : ' • الفرق: ${money(actual - p.quantity)}'}'),
             trailing: Text(actual == null ? 'لم يُعدّ' : '${money(actual)} قطعة', style: TextStyle(color: actual == null ? Colors.blueGrey : const Color(0xff237b66), fontWeight: FontWeight.bold)),

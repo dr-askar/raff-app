@@ -16,6 +16,11 @@ jobs:
           channel: stable
           flutter-version: '3.47.7'
           cache: true
+      - name: Keep the demo signing key for subsequent updates
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: raff-demo-signing-v1
       - run: bash scripts/bootstrap.sh
       - run: dart format lib test
       - run: flutter analyze
