@@ -10,8 +10,11 @@ void main() {
   testWidgets('worker editor hides cost fields and disables disallowed fields', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final s = AppStore(prefs: await SharedPreferences.getInstance()); await s.initialize();
-    await s.setOwnerPassword('owner123');
-    await s.setWorkerAccess('local', const WorkerAccess().withValue('editQuantity', true)); s.lockWorker();
+    await tester.runAsync(() async {
+      await s.setOwnerPassword('owner123');
+      await s.setWorkerAccess('local', const WorkerAccess().withValue('editQuantity', true));
+    });
+    s.lockWorker();
     await tester.pumpWidget(MaterialApp(home: ProductEditor(store: s, product: s.products.first)));
     await tester.pumpAndSettle();
     expect(find.text('عملة رأس المال'), findsNothing);
