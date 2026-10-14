@@ -273,7 +273,7 @@ class _HomeState extends State<Home> {
         subtitle: Text('${h.kind} • ${h.actor}\n${h.at.replaceFirst('T', ' ').split('.').first} UTC'),
         trailing: Text('${money(h.before)}\n↓ ${money(h.after)}')))),
     ] else const Padding(padding: EdgeInsets.all(24), child: Text('إدارة الصرف والأسعار والملفات متاحة لصاحب المحل. يمكنك البحث وحساب الزبون وإدخال أعداد الجرد.')),
-    const SizedBox(height: 24), const Center(child: Text('رفّ • نسخة أولية 0.1.0', style: TextStyle(color: Colors.blueGrey))),
+    const SizedBox(height: 24), const Center(child: Text('رفّ • نسخة أولية 0.1.1', style: TextStyle(color: Colors.blueGrey))),
   ]);
 
   Future<void> currencyDialog() async {
@@ -289,15 +289,24 @@ class _HomeState extends State<Home> {
       final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx'], withData: true);
       if (picked == null || !mounted) { return; }
       if (picked.files.single.size > 5 * 1024 * 1024) { throw const FormatException('استخدم ملفاً أصغر من 5 ميغابايت.'); }
+      final settingsRevision = s.settings.revision;
       final plan = StoreFiles.preview(picked.files.single.bytes!, s.products, s.settings, s.newId);
       final preview = '${plan.added} مادة جديدة • ${plan.updated} تحديث\n${plan.warnings.length} صفوف تحتاج مراجعة\n\n${plan.warnings.take(10).join('\n')}\n\n${plan.products.take(5).map((p) => '${p.name}: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'}').join('\n')}\n\nيتم حفظ الصفوف الصالحة فقط، كل مادة على حدة.';
       if (!mounted || plan.products.isEmpty) { throw FormatException('لا توجد مواد صالحة للاستيراد.\n${plan.warnings.take(5).join('\n')}'); }
       if (!await confirm(context, 'معاينة الاستيراد', preview)) { return; }
-      var completed = 0;
-      try {
-        for (final p in plan.products) { await s.saveProduct(p, expectedRevision: p.revision - 1); completed++; }
-      } catch (_) { throw FormatException('تم استيراد $completed من ${plan.products.length}. راجع البيانات قبل إعادة المحاولة.'); }
-    }, 'انتهت عملية استيراد الملف');
+      final result = await s.importProducts(plan.products, settingsRevision: settingsRevision);
+      if (!mounted) { return; }
+      final issues = [...plan.warnings, ...result.errors];
+      final report = 'أُضيفت ${result.added} مادة جديدة\nتحدثت ${result.updated} مادة موجودة\n${issues.length} ملاحظات\n\n${issues.join('\n')}';
+      await showDialog<void>(context: context, builder: (ctx) => AlertDialog(
+        title: Text(result.saved == 0 ? 'لم تُحفظ مواد' : 'نتيجة الاستيراد'),
+        content: SingleChildScrollView(child: Text(report)),
+        actions: [
+          if (issues.isNotEmpty) TextButton(onPressed: () => perform(ctx, () => StoreFiles.shareBytes(utf8.encode(report), 'raff-import-report.txt', 'text/plain'), 'تقرير الاستيراد جاهز'), child: const Text('حفظ التقرير')),
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+        ],
+      ));
+    }, 'انتهت مراجعة الاستيراد');
   }
   Future<void> restore() => action(() async {
     final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json'], withData: true);

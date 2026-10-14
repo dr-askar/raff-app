@@ -24,10 +24,10 @@ class StoreFiles {
     final book = Excel.createExcel();
     final sheet = book['Products'];
     book.delete('Sheet1');
-    sheet.appendRow(['name', 'barcode', 'category', 'pack', 'quantity', 'cost_usd',
+    sheet.appendRow(['id', 'name', 'barcode', 'category', 'pack', 'quantity', 'cost_usd',
       'margin_percent', 'manual_price', 'sale_price', 'exchange_rate'].map(TextCellValue.new).toList());
     for (final p in products) {
-      sheet.appendRow([TextCellValue(p.name), TextCellValue(p.barcode), TextCellValue(p.category),
+      sheet.appendRow([TextCellValue(p.id), TextCellValue(p.name), TextCellValue(p.barcode), TextCellValue(p.category),
         IntCellValue(p.pack), DoubleCellValue(p.quantity), p.costUsd == null ? null : DoubleCellValue(p.costUsd!),
         p.margin == null ? null : DoubleCellValue(p.margin!), p.manualPrice == null ? null : DoubleCellValue(p.manualPrice!),
         p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate)]);
@@ -57,15 +57,18 @@ class StoreFiles {
     final sheet = book.tables['Products'] ?? book.tables.values.first;
     if (sheet.rows.isEmpty) { throw const FormatException('لا توجد صفوف للاستيراد.'); }
     const aliases = {
+      'معرف المادة': 'id', 'معرّف المادة': 'id', 'معرف': 'id', 'product_id': 'id',
       'اسم المادة': 'name', 'الاسم': 'name', 'الباركود': 'barcode', 'التصنيف': 'category',
+      'اسم': 'name', 'المادة': 'name', 'اسم المنتج': 'name', 'اسم الصنف': 'name',
+      'باركود': 'barcode', 'رقم الباركود': 'barcode', 'الفئة': 'category',
       'التعبئة': 'pack', 'الكمية': 'quantity', 'التكلفة': 'cost_usd',
       'نسبة الربح': 'margin_percent', 'سعر ثابت': 'manual_price',
     };
     final headers = sheet.rows.first.map((c) {
-      final s = c?.value?.toString().trim().toLowerCase() ?? '';
+      final s = (c?.value?.toString() ?? '').replaceAll(RegExp('[\u200e\u200f\ufeff]'), '').trim().toLowerCase();
       return aliases[s] ?? s;
     }).toList();
-    if (!headers.contains('name') && !headers.contains('barcode')) {
+    if (!headers.contains('name') && !headers.contains('barcode') && !headers.contains('id')) {
       throw const FormatException('ضع عمود name / اسم المادة أو barcode / الباركود في أول صف.');
     }
     final planned = <Product>[], warnings = <String>[];
@@ -80,27 +83,37 @@ class StoreFiles {
       }
       if (row.every((c) => (c?.value?.toString().trim() ?? '').isEmpty)) { continue; }
       try {
+        final importedId = field('id');
         final barcode = field('barcode'); final name = field('name');
         Product? old;
+        if (importedId != null) {
+          for (final p in working) { if (p.id == importedId) { old = p; break; } }
+        }
         if (barcode != null) {
-          for (final p in working) { if (p.barcode == barcode) { old = p; break; } }
-        } else if (name != null) {
+          for (final p in working) {
+            if (p.barcode == barcode) {
+              if (old != null && old.id != p.id) { throw const FormatException('معرف المادة والباركود يخصان مادتين مختلفتين'); }
+              old ??= p; break;
+            }
+          }
+        }
+        if (old == null && name != null) {
           final matches = working.where((p) => p.name == name).toList();
-          if (matches.length > 1) { throw const FormatException('اسم مكرر؛ استخدم الباركود للمطابقة'); }
-          if (matches.isNotEmpty) { old = matches.first; }
+          if (barcode == null && matches.length > 1) { throw const FormatException('اسم مكرر؛ استخدم الباركود أو المعرف للمطابقة'); }
+          if (matches.length == 1 && (barcode == null || matches.first.barcode.isEmpty)) { old = matches.first; }
         }
         if (old == null && name == null) { throw const FormatException('المادة الجديدة تحتاج اسماً'); }
         final matched = old;
         if (matched != null && planned.any((p) => p.id == matched.id)) { throw const FormatException('المادة مكررة داخل الملف'); }
         double? numeric(String key) {
           final value = field(key); if (value == null) { return null; }
-          final parsed = double.tryParse(value);
+          final parsed = double.tryParse(_normalizeNumber(value, percent: key == 'margin_percent'));
           if (parsed == null || !parsed.isFinite || parsed < 0) { throw FormatException('قيمة غير صالحة في $key'); }
           return parsed;
         }
         final pack = numeric('pack');
         if (pack != null && (pack < 1 || pack != pack.roundToDouble())) { throw const FormatException('عدد التعبئة يجب أن يكون عدداً صحيحاً موجباً'); }
-        final base = old ?? Product(id: newId(), name: name!);
+        final base = old ?? Product(id: importedId ?? newId(), name: name!);
         final p = base.edit(name: name, barcode: barcode, category: field('category'),
           pack: pack?.toInt(), quantity: numeric('quantity'), costUsd: numeric('cost_usd'),
           margin: numeric('margin_percent'), manualPrice: numeric('manual_price'), settings: settings);
@@ -110,5 +123,20 @@ class StoreFiles {
       } catch (e) { warnings.add('الصف ${rowIndex + 1}: ${e is FormatException ? e.message : 'تعذر قراءة الصف'}'); }
     }
     return ImportPlan(planned, warnings, added, updated);
+  }
+
+  static String _normalizeNumber(String value, {bool percent = false}) {
+    var normalized = value.replaceAllMapped(RegExp('[٠-٩۰-۹]'), (m) {
+      final code = m[0]!.codeUnitAt(0);
+      return '${code >= 0x6f0 ? code - 0x6f0 : code - 0x660}';
+    }).replaceAll(RegExp(r'[\s\u00a0\u200e\u200f]'), '')
+      .replaceAll('٬', '').replaceAll('٫', '.');
+    if (percent) { normalized = normalized.replaceAll('%', '').replaceAll('٪', ''); }
+    if (RegExp(r'^\d{1,3}(,\d{3})+(\.\d+)?$').hasMatch(normalized)) {
+      normalized = normalized.replaceAll(',', '');
+    } else if (!normalized.contains('.') && ','.allMatches(normalized).length == 1) {
+      normalized = normalized.replaceAll(',', '.');
+    }
+    return normalized;
   }
 }

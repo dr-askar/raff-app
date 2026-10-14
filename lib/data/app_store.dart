@@ -7,6 +7,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../domain/models.dart';
 
+class ImportResult {
+  final int added, updated;
+  final List<String> errors;
+  const ImportResult({required this.added, required this.updated, required this.errors});
+  int get saved => added + updated;
+}
+
 class AppStore extends ChangeNotifier {
   final bool cloud;
   final String storeId;
@@ -217,6 +224,30 @@ class AppStore extends ChangeNotifier {
       history.insert(0, change);
       await _persist(); notifyListeners();
     }
+  }
+
+  Future<ImportResult> importProducts(List<Product> rows, {required int settingsRevision}) async {
+    _requireOwner();
+    var added = 0, updated = 0;
+    final errors = <String>[];
+    for (var index = 0; index < rows.length; index++) {
+      final p = rows[index];
+      if (settings.revision != settingsRevision) {
+        errors.add('تغيرت إعدادات الأسعار. بقيت ${rows.length - index} مادة دون حفظ؛ أعد معاينة الملف.');
+        break;
+      }
+      final existed = findId(p.id) != null;
+      try {
+        await saveProduct(p, expectedRevision: p.revision - 1);
+        if (existed) { updated++; } else { added++; }
+      } on FormatException catch (e) {
+        errors.add('${p.name}: ${e.message}');
+      } catch (_) {
+        errors.add('${p.name}: تعذر الحفظ أو المزامنة. بقيت ${rows.length - index} مادة دون حفظ؛ تحقق من الاتصال والصلاحيات.');
+        break;
+      }
+    }
+    return ImportResult(added: added, updated: updated, errors: errors);
   }
 
   Future<void> changeSettings(double rate, double margin, String currency) async {

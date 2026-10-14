@@ -10,6 +10,54 @@ List<int> workbook(List<List<CellValue?>> rows) {
 }
 void main() {
   const settings = StoreSettings(rate: 10000, margin: 20);
+  test('an edited export can rename an item without a barcode and add a new item', () {
+    const old = Product(id: 'existing', name: 'اسم قديم', quantity: 7,
+      costUsd: 2, saleBaseUsd: 2.4, ready: true, revision: 3);
+    final book = Excel.decodeBytes(StoreFiles.productExcel([old], settings));
+    book['Products'].cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: 1)).value = TextCellValue('اسم جديد');
+    book['Products'].appendRow([null, TextCellValue('مادة مضافة من Excel')]);
+    final plan = StoreFiles.preview(book.encode()!, [old], settings, () => 'new');
+    expect(plan.warnings, isEmpty); expect(plan.updated, 1); expect(plan.added, 1);
+    expect(plan.products.first.id, old.id); expect(plan.products.first.name, 'اسم جديد');
+    expect(plan.products.first.quantity, 7); expect(plan.products.first.revision, 4);
+    expect(plan.products.last.id, 'new'); expect(plan.products.last.ready, false);
+  });
+  test('a barcode identifies a renamed item in old exports without an id', () {
+    const old = Product(id: 'p', name: 'قديم', barcode: '00123', revision: 4);
+    final plan = StoreFiles.preview(workbook([
+      [TextCellValue('name'), TextCellValue('barcode')],
+      [TextCellValue('جديد'), TextCellValue('00123')],
+    ]), [old], settings, () => 'new');
+    expect(plan.updated, 1); expect(plan.added, 0);
+    expect(plan.products.single.id, 'p'); expect(plan.products.single.name, 'جديد');
+  });
+  test('new rows accept Arabic digits and thousands separators', () {
+    final plan = StoreFiles.preview(workbook([
+      [TextCellValue('اسم المنتج'), TextCellValue('quantity'), TextCellValue('manual_price')],
+      [TextCellValue('جديد'), TextCellValue('١٢'), TextCellValue('12,500')],
+    ]), [], settings, () => 'new');
+    expect(plan.warnings, isEmpty); expect(plan.products.single.quantity, 12);
+    expect(plan.products.single.manualPrice, 12500);
+  });
+  test('adding a barcode to an existing unique unbarcoded item updates it', () {
+    const old = Product(id: 'p', name: 'حليب', revision: 1);
+    final plan = StoreFiles.preview(workbook([
+      [TextCellValue('name'), TextCellValue('barcode')],
+      [TextCellValue('حليب'), TextCellValue('123')],
+    ]), [old], settings, () => 'new');
+    expect(plan.products.single.id, 'p'); expect(plan.updated, 1);
+  });
+  test('conflicting id and barcode skip one row without stopping a valid addition', () {
+    const a = Product(id: 'a', name: 'أ', barcode: '111');
+    const b = Product(id: 'b', name: 'ب', barcode: '222');
+    final plan = StoreFiles.preview(workbook([
+      [TextCellValue('id'), TextCellValue('name'), TextCellValue('barcode')],
+      [TextCellValue('a'), TextCellValue('تعارض'), TextCellValue('222')],
+      [null, TextCellValue('جديد'), TextCellValue('333')],
+    ]), [a, b], settings, () => 'new');
+    expect(plan.warnings.length, 1); expect(plan.products.single.id, 'new');
+    expect(plan.added, 1);
+  });
   test('name-only imports create unpriced products with safe defaults', () {
     final plan = StoreFiles.preview(workbook([
       [TextCellValue('اسم المادة')], [TextCellValue('سكر')],
