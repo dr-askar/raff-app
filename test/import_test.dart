@@ -10,6 +10,24 @@ List<int> workbook(List<List<CellValue?>> rows) {
 }
 void main() {
   const settings = StoreSettings(rate: 10000, margin: 20);
+  test('external editor workbook adds an unbarcoded item and updates existing rows', () {
+    final bytes = base64Decode(File('test/fixtures/edited_excel.base64').readAsStringSync().trim());
+    const existing = [
+      Product(id: 'a', name: 'Old A', barcode: '1000000000001'),
+      Product(id: 'b', name: 'Sample B', barcode: '1000000000002'),
+      Product(id: 'c', name: 'Sample C', barcode: '1000000000003'),
+    ];
+    final plan = StoreFiles.preview(bytes, existing, settings, () => 'new');
+    expect(plan.warnings, isEmpty);
+    expect(plan.updated, 3); expect(plan.added, 1);
+    expect(plan.products.first.name, 'Sample A');
+    expect(plan.products.last.name, 'New sample');
+    expect(plan.products.last.barcode, isEmpty);
+    expect(plan.products.last.quantity, 10);
+    expect(plan.products.last.costUsd, 0.8);
+    expect(plan.products.last.margin, 8);
+    expect(plan.products.last.manualPrice, 9000);
+  });
   test('an edited export can rename an item without a barcode and add a new item', () {
     const old = Product(id: 'existing', name: 'اسم قديم', quantity: 7,
       costUsd: 2, saleBaseUsd: 2.4, ready: true, revision: 3);
@@ -104,3 +122,5 @@ void main() {
     expect(plan.products.length, 1); expect(plan.warnings.length, 1);
   });
 }
+import 'dart:convert';
+import 'dart:io';
