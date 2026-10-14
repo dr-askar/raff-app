@@ -1,0 +1,430 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
+import '../domain/models.dart';
+
+class AppStore extends ChangeNotifier {
+  final bool cloud;
+  final String storeId;
+  final SharedPreferences prefs;
+  AppStore({required this.prefs, this.cloud = false, this.storeId = 'main'});
+  static const _key = 'raff.demo.v1';
+  static const _uuid = Uuid();
+  final List<StreamSubscription<dynamic>> _subscriptions = [];
+  final Map<String, Json> _public = {}, _pricing = {};
+  Json? _stockMeta, _stockCosts;
+  final Map<String, Json> _stockCounts = {};
+  bool _stockReady = false;
+  bool _productsReady = false, _pricingReady = false, _settingsReady = false;
+  final Map<String, SnapshotMetadata> _metadataSources = {};
+  List<Product> products = [];
+  List<PriceChange> history = [];
+  StoreSettings settings = const StoreSettings();
+  Stocktake? stocktake;
+  bool owner = true, fromCache = false, pending = false, loaded = false;
+  String actor = 'صاحب المحل', error = '';
+  String? uid;
+  DocumentReference<Json> get root => FirebaseFirestore.instance.collection('stores').doc(storeId);
+  bool get usable => !cloud || uid != null;
+  String get syncLabel => !cloud ? 'تجربة محلية • لا توجد مزامنة' :
+    pending ? 'تعديلات بانتظار المزامنة' : fromCache ? 'بيانات محفوظة • الاتصال غير مؤكد' : 'متصل • تمت المزامنة';
+
+  Future<void> initialize() async {
+    if (cloud) { owner = false; return; }
+    final saved = prefs.getString(_key);
+    if (saved != null) { _load(Json.from(jsonDecode(saved))); }
+    else {
+      settings = const StoreSettings(rate: 10000, margin: 20);
+      products = [
+        Product(id: _uuid.v4(), name: 'حليب كامل الدسم', category: 'ألبان', barcode: '6281000000011',
+          pack: 12, quantity: 24, costUsd: 0.75, saleBaseUsd: 0.9, ready: true),
+        Product(id: _uuid.v4(), name: 'أرز — 1 كغ', category: 'مواد غذائية', barcode: '6281000000028',
+          pack: 10, quantity: 40, costUsd: 1.2, saleBaseUsd: 1.44, ready: true),
+        Product(id: _uuid.v4(), name: 'مياه — 1.5 لتر', category: 'مشروبات', barcode: '6281000000035',
+          pack: 6, quantity: 60, costUsd: 0.25, saleBaseUsd: 0.3, ready: true),
+      ];
+      await _persist();
+    }
+    loaded = true;
+    notifyListeners();
+  }
+
+  Future<void> connect(User user) async {
+    await disconnect();
+    final member = await root.collection('members').doc(user.uid).get();
+    final data = member.data();
+    if (data == null || data['active'] != true || !['owner', 'worker'].contains(data['role'])) {
+      throw const FormatException('الحساب غير مضاف للمحل. اطلب من صاحب المحل تفعيل حسابك.');
+    }
+    uid = user.uid;
+    owner = data['role'] == 'owner';
+    actor = data['name'] as String? ?? user.email ?? 'مستخدم';
+    error = '';
+    _watch(root.collection('members').doc(user.uid).snapshots(), (snap) {
+      final m = snap.data();
+      if (m == null || m['active'] != true || (m['role'] == 'owner') != owner) {
+        unawaited(FirebaseAuth.instance.signOut());
+      }
+    });
+    _watch(root.collection('settings').doc('current').snapshots(includeMetadataChanges: true), (snap) {
+      settings = StoreSettings.fromJson(snap.data() ?? {});
+      _settingsReady = snap.exists;
+      if (!snap.exists) { error = 'إعدادات المحل غير موجودة. أكمل إعداد Firebase حسب ملف README.'; }
+      _metadata('settings', snap.metadata); _setLoaded();
+    });
+    _watch(root.collection('products').snapshots(includeMetadataChanges: true), (snap) {
+      _public.clear();
+      for (final doc in snap.docs) { _public[doc.id] = doc.data(); }
+      _rebuild();
+      _productsReady = true; _setLoaded();
+      _metadata('products', snap.metadata);
+    });
+    if (owner) {
+      _watch(root.collection('pricing').snapshots(includeMetadataChanges: true), (snap) {
+        _pricing.clear();
+        for (final doc in snap.docs) { _pricing[doc.id] = doc.data(); }
+        _rebuild();
+        _pricingReady = true; _setLoaded();
+        _metadata('pricing', snap.metadata);
+      });
+      _watch(root.collection('priceChanges').orderBy('at', descending: true).limit(100).snapshots(), (snap) {
+        history = snap.docs.map((d) => PriceChange.fromJson(d.data())).toList();
+      });
+    }
+    _watch(root.collection('stocktakes').doc('active').snapshots(), (snap) {
+      _stockMeta = snap.data(); _rebuildStock();
+    });
+    _watch(root.collection('stockCounts').snapshots(includeMetadataChanges: true), (snap) {
+      _stockCounts.clear();
+      for (final doc in snap.docs) { _stockCounts[doc.id] = doc.data(); }
+      _rebuildStock(); _metadata('counts', snap.metadata);
+    });
+    if (owner) {
+      _watch(root.collection('stocktakeCosts').doc('active').snapshots(), (snap) {
+        _stockCosts = snap.data(); _rebuildStock();
+      });
+    }
+    notifyListeners();
+  }
+
+  void _watch<T>(Stream<T> stream, void Function(T) apply) {
+    _subscriptions.add(stream.listen((event) {
+      apply(event);
+      notifyListeners();
+    }, onError: (Object e) {
+      error = 'تعذر مزامنة البيانات. تحقق من الإنترنت والصلاحيات.';
+      notifyListeners();
+    }));
+  }
+  void _metadata(String source, SnapshotMetadata m) {
+    _metadataSources[source] = m;
+    fromCache = _metadataSources.values.any((m) => m.isFromCache);
+    pending = _metadataSources.values.any((m) => m.hasPendingWrites);
+  }
+  void _setLoaded() { loaded = _productsReady && _settingsReady && (!owner || _pricingReady); }
+  void _rebuildStock() {
+    final j = _stockMeta;
+    if (j == null) { stocktake = null; return; }
+    stocktake = Stocktake.fromJson({...j,
+      'counts': {for (final e in _stockCounts.entries) if (e.value['sessionId'] == j['id']) e.key: e.value['count']},
+      'snapshot': _stockCosts?['sessionId'] == j['id'] ? _stockCosts!['snapshot'] : {},
+    });
+    final revisions = _stockCounts.values.where((c) => c['sessionId'] == j['id']).map((c) => number(c['countRevision']).toInt());
+    final latest = revisions.fold<int>(0, (a, b) => a > b ? a : b);
+    _stockReady = latest == stocktake!.countRevision &&
+      (!owner || _stockCosts?['sessionId'] == j['id']);
+  }
+  void _rebuild() {
+    products = _public.entries.map((e) => Product.fromJson(e.key, e.value, _pricing[e.key])).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+  }
+  Future<void> disconnect() async {
+    for (final s in _subscriptions) { await s.cancel(); }
+    _subscriptions.clear();
+    if (cloud) {
+      products = []; history = []; _public.clear(); _pricing.clear();
+      stocktake = null; owner = false; loaded = false; uid = null;
+      settings = const StoreSettings();
+      _stockMeta = null; _stockCosts = null; _stockCounts.clear(); _metadataSources.clear();
+      _stockReady = false;
+      _productsReady = false; _pricingReady = false; _settingsReady = false;
+      fromCache = false; pending = false; error = '';
+    }
+  }
+  void _requireOwner() {
+    if (!owner || !usable) { throw const FormatException('هذه العملية متاحة لصاحب المحل فقط.'); }
+  }
+  void demoRole(bool isOwner) { if (!cloud) { owner = isOwner; actor = owner ? 'صاحب المحل' : 'عامل تجريبي'; notifyListeners(); } }
+  Product? findBarcode(String code) {
+    for (final p in products) { if (p.barcode == code.trim()) { return p; } }
+    return null;
+  }
+  Product? findId(String id) {
+    for (final p in products) { if (p.id == id) { return p; } }
+    return null;
+  }
+  String newId() => _uuid.v4();
+  DocumentReference<Json> _barcode(String code) => root.collection('barcodes').doc(base64Url.encode(utf8.encode(code)));
+  PriceChange _change(String name, String kind, double before, double after) =>
+    PriceChange(name: name, actor: actor, kind: kind,
+      at: DateTime.now().toUtc().toIso8601String(), before: before, after: after);
+
+  Future<void> saveProduct(Product product, {int? expectedRevision}) async {
+    _requireOwner(); product.validate();
+    final baseSettings = settings;
+    final old = findId(product.id);
+    if (old != null && expectedRevision != null && old.revision != expectedRevision) {
+      throw const FormatException('تعدلت المادة. افتحها مجدداً قبل الحفظ.');
+    }
+    final duplicate = findBarcode(product.barcode);
+    if (product.barcode.isNotEmpty && duplicate != null && duplicate.id != product.id) {
+      throw const FormatException('هذا الباركود مستخدم لمادة أخرى.');
+    }
+    final change = _change(product.name, old == null ? 'إضافة مادة' : 'تعديل مادة',
+      old?.price(baseSettings) ?? 0, product.price(baseSettings));
+    if (cloud) {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final ref = root.collection('products').doc(product.id);
+        final current = await tx.get(ref);
+        if (current.exists && current.data()?['revision'] != (expectedRevision ?? old?.revision)) {
+          throw const FormatException('تعدلت المادة على جهاز آخر. افتحها مجدداً قبل الحفظ.');
+        }
+        if (product.barcode.isNotEmpty) {
+          final code = await tx.get(_barcode(product.barcode));
+          if (code.exists && code.data()?['productId'] != product.id) {
+            throw const FormatException('هذا الباركود مستخدم لمادة أخرى.');
+          }
+        }
+        final settingsDoc = await tx.get(root.collection('settings').doc('current'));
+        if (settingsDoc.exists && settingsDoc.data()?['revision'] != baseSettings.revision) {
+          throw const FormatException('تغيرت إعدادات الأسعار. حاول مجدداً.');
+        }
+        final previousBarcode = current.data()?['barcode'] as String? ?? '';
+        if (previousBarcode.isNotEmpty && previousBarcode != product.barcode) { tx.delete(_barcode(previousBarcode)); }
+        if (product.barcode.isNotEmpty) { tx.set(_barcode(product.barcode), {'productId': product.id}); }
+        tx.set(ref, {...product.toJson(), 'updatedBy': uid, 'updatedAt': FieldValue.serverTimestamp()});
+        tx.set(root.collection('pricing').doc(product.id), product.pricingJson());
+        tx.set(root.collection('priceChanges').doc(), {...change.toJson(), 'uid': uid});
+      });
+      _public[product.id] = product.toJson(); _pricing[product.id] = product.pricingJson();
+      _rebuild(); notifyListeners();
+    } else {
+      products = [...products.where((p) => p.id != product.id), product];
+      history.insert(0, change);
+      await _persist(); notifyListeners();
+    }
+  }
+
+  Future<void> changeSettings(double rate, double margin, String currency) async {
+    _requireOwner();
+    final previous = settings;
+    if (!rate.isFinite || rate <= 0 || !margin.isFinite || margin < 0 || currency.trim().isEmpty) {
+      throw const FormatException('أدخل سعر صرف موجباً وربحاً غير سالب واسم العملة.');
+    }
+    // General-margin changes reprice only automatic products following the general margin.
+    final changed = products.where((p) => p.margin == null && p.costUsd != null && p.manualPrice == null)
+      .map((p) => p.edit(settings: StoreSettings(rate: rate, margin: margin))).toList();
+    if (margin != previous.margin && changed.length > 140) { throw const FormatException('تعديل النسبة العامة يدعم حتى 140 مادة حالياً. عدّل على دفعات.'); }
+    final next = StoreSettings(rate: rate, margin: margin, currency: currency.trim(), revision: previous.revision + 1);
+    final rateChange = _change('سعر الصرف', 'تغيير الصرف', previous.rate, rate);
+    final marginChange = _change('نسبة الربح العامة', 'تغيير الربح', previous.margin, margin);
+    if (cloud) {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final ref = root.collection('settings').doc('current');
+        final current = await tx.get(ref);
+        if (current.exists && current.data()?['revision'] != previous.revision) {
+          throw const FormatException('تغيرت الإعدادات على جهاز آخر. حاول مجدداً.');
+        }
+        final docs = <DocumentSnapshot<Json>>[];
+        if (margin != previous.margin) {
+          for (final p in changed) { docs.add(await tx.get(root.collection('products').doc(p.id))); }
+          for (var i = 0; i < docs.length; i++) {
+            if (docs[i].data()?['revision'] != changed[i].revision - 1) {
+              throw const FormatException('تغيرت مادة أثناء التعديل. حاول مجدداً.');
+            }
+          }
+        }
+        tx.set(ref, next.toJson());
+        tx.set(root.collection('priceChanges').doc(), {...rateChange.toJson(), 'uid': uid});
+        if (margin != previous.margin) {
+          tx.set(root.collection('priceChanges').doc(), {...marginChange.toJson(), 'uid': uid});
+          for (final p in changed) { tx.update(root.collection('products').doc(p.id), p.toJson()); }
+        }
+      });
+      settings = next;
+      if (margin != previous.margin) { for (final p in changed) { _public[p.id] = p.toJson(); } _rebuild(); }
+      notifyListeners();
+    } else {
+      if (margin != previous.margin) {
+        final map = {for (final p in changed) p.id: p};
+        products = products.map((p) => map[p.id] ?? p).toList();
+        history.insert(0, marginChange);
+      }
+      history.insert(0, rateChange); settings = next;
+      await _persist(); notifyListeners();
+    }
+  }
+
+  Future<void> bulkMargin(List<Product> selected, double increase) async {
+    _requireOwner();
+    if (selected.isEmpty || selected.length > 100 || !increase.isFinite || increase < 0) {
+      throw const FormatException('اختر من 1 إلى 100 مادة ونسبة غير سالبة.');
+    }
+    // Each edit is revision-checked and audited. Report completed count on failure.
+    var completed = 0;
+    try {
+      for (final p in selected) {
+        await saveProduct(p.edit(margin: p.effectiveMargin(settings) + increase, settings: settings), expectedRevision: p.revision);
+        completed++;
+      }
+    } catch (_) {
+      throw FormatException('تم تعديل $completed من ${selected.length}. توقف التعديل؛ راجع السجل قبل إعادة المحاولة.');
+    }
+  }
+
+  Future<void> startStocktake() async {
+    _requireOwner();
+    if (cloud && fromCache) { throw const FormatException('انتظر اكتمال المزامنة قبل تثبيت تكلفة الجرد.'); }
+    if (stocktake != null && !stocktake!.closed) { throw const FormatException('اعتمد الجرد الحالي قبل بدء جرد جديد.'); }
+    final s = Stocktake(id: newId(), at: DateTime.now().toUtc().toIso8601String(),
+      rate: settings.rate, currency: settings.currency,
+      productIds: products.map((p) => p.id).toList(),
+      snapshot: {for (final p in products) p.id: {'name': p.name, 'barcode': p.barcode,
+        'quantity': p.quantity, 'costUsd': p.costUsd, 'pack': p.pack}});
+    if (products.length > 400) { throw const FormatException('الجرد الحالي يدعم حتى 400 مادة. يلزم تقسيم الجرد للمخزون الأكبر.'); }
+    if (cloud) {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final ref = root.collection('stocktakes').doc('active');
+        final active = await tx.get(ref);
+        if (active.exists && active.data()?['closed'] != true) { throw const FormatException('يوجد جرد مفتوح على جهاز آخر.'); }
+        tx.set(ref, {'id': s.id, 'at': s.at, 'rate': s.rate, 'currency': s.currency, 'closed': false, 'countRevision': 0, 'productIds': s.productIds});
+        tx.set(root.collection('stocktakeCosts').doc('active'), {'sessionId': s.id, 'snapshot': s.snapshot});
+      });
+    } else { stocktake = s; await _persist(); notifyListeners(); }
+  }
+  Future<void> countProduct(String id, double count) async {
+    final s = stocktake;
+    if (!usable || s == null || s.closed || count < 0 || !count.isFinite ||
+        findId(id) == null || !s.productIds.contains(id)) {
+      throw const FormatException('تحقق من العدد ومن وجود جلسة جرد مفتوحة.');
+    }
+    if (cloud) {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final activeRef = root.collection('stocktakes').doc('active');
+        final active = await tx.get(activeRef);
+        if (active.data()?['id'] != s.id || active.data()?['closed'] != false) {
+          throw const FormatException('الجرد مغلق أو تغيرت جلسته. أعد فتح الشاشة.');
+        }
+        tx.set(root.collection('stockCounts').doc(id), {'sessionId': s.id,
+          'count': count, 'updatedBy': uid, 'at': FieldValue.serverTimestamp(),
+          'countRevision': number(active.data()?['countRevision']).toInt() + 1});
+        // Any new count makes an in-flight approval retry, including a new product row.
+        tx.update(activeRef, {'countRevision': number(active.data()?['countRevision']).toInt() + 1});
+      });
+    } else {
+      stocktake = Stocktake.fromJson({...s.toJson(), 'counts': {...s.counts, id: count}, 'countRevision': s.countRevision + 1});
+      await _persist(); notifyListeners();
+    }
+  }
+  Future<void> approveStocktake() async {
+    _requireOwner(); final s = stocktake;
+    if (s == null || s.closed || s.counts.isEmpty) { throw const FormatException('لا يوجد جرد لاعتماده.'); }
+    if (s.counts.length > 400) { throw const FormatException('اعتماد الجرد يدعم حتى 400 مادة حالياً.'); }
+    if (cloud) {
+      if (!_stockReady || fromCache) { throw const FormatException('انتظر وصول آخر أعداد الجرد وتكاليفه قبل الاعتماد.'); }
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final activeRef = root.collection('stocktakes').doc('active');
+        final active = await tx.get(activeRef);
+        if (active.data()?['id'] != s.id || active.data()?['closed'] != false ||
+            active.data()?['countRevision'] != s.countRevision) {
+          throw const FormatException('تغيرت جلسة الجرد. أعد فتح الشاشة.');
+        }
+        final rows = <String, DocumentSnapshot<Json>>{};
+        final currentCounts = <String, DocumentSnapshot<Json>>{};
+        for (final id in s.counts.keys) {
+          rows[id] = await tx.get(root.collection('products').doc(id));
+          currentCounts[id] = await tx.get(root.collection('stockCounts').doc(id));
+        }
+        for (final id in rows.keys) {
+          final c = currentCounts[id]!.data();
+          if (c?['sessionId'] != s.id || number(c?['count']) != s.counts[id]) {
+            throw const FormatException('تغير عدد أثناء اعتماد الجرد. راجع الأعداد مجدداً.');
+          }
+          if (rows[id]!.exists) { tx.update(rows[id]!.reference, {
+            'quantity': s.counts[id], 'revision': number(rows[id]!.data()?['revision']).toInt() + 1,
+            'updatedBy': uid, 'updatedAt': FieldValue.serverTimestamp()}); }
+        }
+        tx.update(activeRef, {'closed': true});
+        tx.set(root.collection('stocktakeArchive').doc(s.id), s.toJson());
+      });
+    } else {
+      products = products.map((p) => s.counts.containsKey(p.id) ?
+        p.edit(quantity: s.counts[p.id], settings: settings) : p).toList();
+      stocktake = Stocktake.fromJson({...s.toJson(), 'closed': true});
+      await _persist(); notifyListeners();
+    }
+  }
+
+  Json backup() {
+    _requireOwner();
+    return {'schema': 1, 'createdAt': DateTime.now().toUtc().toIso8601String(),
+      'settings': settings.toJson(), 'products': [for (final p in products)
+        {'id': p.id, ...p.toJson(), 'pricing': p.pricingJson()}],
+      'history': history.map((c) => c.toJson()).toList(), 'stocktake': stocktake?.toJson()};
+  }
+  Future<void> restore(Json data) async {
+    _requireOwner();
+    // Cloud restore uses the regular revision-checked product path; never restores memberships.
+    if (data['schema'] != 1 || data['products'] is! List || data['settings'] is! Map) {
+      throw const FormatException('ملف النسخة الاحتياطية غير صالح.');
+    }
+    final nextSettings = StoreSettings.fromJson(Json.from(data['settings']));
+    Stocktake? restoredStock;
+    if (data['stocktake'] != null) {
+      restoredStock = Stocktake.fromJson(Json.from(data['stocktake']));
+      if (restoredStock.rate <= 0 || restoredStock.counts.values.any((c) => c < 0)) {
+        throw const FormatException('أعداد الجرد أو سعر الصرف في النسخة غير صالحة.');
+      }
+    }
+    final restored = (data['products'] as List).map((j) => Product.fromJson(j['id'], Json.from(j), Json.from(j['pricing'] ?? {}))).toList();
+    final ids = <String>{}, codes = <String>{};
+    for (final p in restored) {
+      p.validate();
+      if (!ids.add(p.id) || (p.barcode.isNotEmpty && !codes.add(p.barcode))) {
+        throw const FormatException('النسخة تحتوي مواد أو باركودات مكررة.');
+      }
+    }
+    if (nextSettings.rate <= 0 || nextSettings.margin < 0) { throw const FormatException('إعدادات النسخة غير صالحة.'); }
+    if (cloud) {
+      var completed = 0;
+      try {
+        await changeSettings(nextSettings.rate, nextSettings.margin, nextSettings.currency);
+        for (final p in restored) {
+          final old = findId(p.id);
+          await saveProduct(Product.fromJson(p.id, {...p.toJson(), 'revision': (old?.revision ?? 0) + 1}, p.pricingJson()), expectedRevision: old?.revision);
+          completed++;
+        }
+      } catch (_) { throw FormatException('تمت استعادة $completed مادة. توقف الاسترجاع؛ راجع البيانات قبل المحاولة مجدداً.'); }
+    } else {
+      _load(data); await _persist(); notifyListeners();
+    }
+  }
+  void _load(Json j) {
+    settings = StoreSettings.fromJson(Json.from(j['settings'] ?? {}));
+    products = (j['products'] as List? ?? []).map((p) => Product.fromJson(p['id'], Json.from(p), Json.from(p['pricing'] ?? {}))).toList();
+    history = (j['history'] as List? ?? []).map((c) => PriceChange.fromJson(Json.from(c))).toList();
+    stocktake = j['stocktake'] == null ? null : Stocktake.fromJson(Json.from(j['stocktake']));
+  }
+  Future<void> _persist() async {
+    final data = {'schema': 1, 'settings': settings.toJson(), 'products': [for (final p in products)
+      {'id': p.id, ...p.toJson(), 'pricing': p.pricingJson()}],
+      'history': history.take(500).map((c) => c.toJson()).toList(), 'stocktake': stocktake?.toJson()};
+    if (!await prefs.setString(_key, jsonEncode(data))) { throw const FormatException('تعذر حفظ البيانات على الجهاز.'); }
+  }
+  @override
+  void dispose() { for (final s in _subscriptions) { unawaited(s.cancel()); } super.dispose(); }
+}

@@ -1,0 +1,27 @@
+name: raff
+description: رفّ — أسعار وباركود وجرد لمحل صغير
+publish_to: none
+version: 0.1.0+1
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  firebase_core: ^3.12.0
+  firebase_auth: ^5.5.0
+  cloud_firestore: ^5.6.4
+  shared_preferences: ^2.5.2
+  mobile_scanner: ^6.0.7
+  excel: ^4.0.6
+  file_picker: ^8.3.7
+  share_plus: ^10.1.4
+  cross_file: ^0.3.4+2
+  uuid: ^4.5.1
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+flutter:
+  uses-material-design: true

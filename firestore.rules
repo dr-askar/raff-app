@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function membership(store) {
+      return get(/databases/$(database)/documents/stores/$(store)/members/$(request.auth.uid)).data;
+    }
+    function member(store) {
+      return signedIn() && membership(store).active == true &&
+        membership(store).role in ['owner', 'worker'];
+    }
+    function owner(store) { return member(store) && membership(store).role == 'owner'; }
+    function nonnegative(n) { return n is number && n >= 0 && n <= 1000000000000; }
+    function validProduct() {
+      let d = request.resource.data;
+      return d.keys().hasAll(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision']) &&
+        d.keys().hasOnly(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision', 'updatedBy', 'updatedAt']) &&
+        d.name is string && d.name.size() > 0 && d.name.size() <= 120 &&
+        d.category is string && d.category.size() <= 80 && d.barcode is string && d.barcode.size() <= 80 &&
+        d.pack is int && d.pack >= 1 && d.pack <= 100000 &&
+        nonnegative(d.quantity) && nonnegative(d.saleBaseUsd) &&
+        (d.manualPrice == null || nonnegative(d.manualPrice)) && d.ready is bool && d.revision is int;
+    }
+    match /stores/{store} {
+      allow read, write: if false;
+      match /members/{user} {
+        allow get: if signedIn() && (request.auth.uid == user || owner(store));
+        allow list: if owner(store);
+        allow create, update: if owner(store) &&
+          request.resource.data.keys().hasOnly(['name', 'role', 'active']) &&
+          request.resource.data.name is string && request.resource.data.name.size() <= 100 &&
+          request.resource.data.role in ['owner', 'worker'] && request.resource.data.active is bool &&
+          (request.auth.uid != user || (request.resource.data.role == 'owner' && request.resource.data.active == true));
+        allow delete: if owner(store) && request.auth.uid != user;
+      }
+      match /settings/current {
+        allow read: if member(store);
+        allow create, update: if owner(store) &&
+          request.resource.data.keys().hasOnly(['rate', 'margin', 'currency', 'revision']) &&
+          request.resource.data.rate is number && request.resource.data.rate > 0 && request.resource.data.rate <= 1000000000 &&
+          nonnegative(request.resource.data.margin) && request.resource.data.currency is string &&
+          request.resource.data.currency.size() > 0 && request.resource.data.currency.size() <= 20 &&
+          request.resource.data.revision is int;
+      }
+      match /products/{product} {
+        allow read: if member(store);
+        allow create: if owner(store) && validProduct() && request.resource.data.revision >= 1;
+        allow update: if owner(store) && validProduct() && request.resource.data.revision == resource.data.revision + 1;
+        // Keep history stable: deletion is intentionally absent from v0.1.
+      }
+      match /pricing/{product} {
+        allow read: if owner(store);
+        allow create, update: if owner(store) &&
+          request.resource.data.keys().hasOnly(['costUsd', 'margin']) &&
+          (request.resource.data.costUsd == null || nonnegative(request.resource.data.costUsd)) &&
+          (request.resource.data.margin == null || nonnegative(request.resource.data.margin));
+      }
+      match /barcodes/{code} {
+        allow read, delete: if owner(store);
+        allow create, update: if owner(store) && request.resource.data.keys().hasOnly(['productId']) &&
+          request.resource.data.productId is string;
+      }
+      match /priceChanges/{change} {
+        allow read: if owner(store);
+        allow create: if owner(store) && request.resource.data.uid == request.auth.uid &&
+          request.resource.data.keys().hasOnly(['name', 'actor', 'kind', 'at', 'before', 'after', 'uid']) &&
+          request.resource.data.at is string && nonnegative(request.resource.data.before) && nonnegative(request.resource.data.after);
+      }
+      match /stocktakes/active {
+        allow read: if member(store);
+        allow create, update: if owner(store) && request.resource.data.keys().hasOnly(['id', 'at', 'rate', 'currency', 'closed', 'countRevision', 'productIds']) &&
+          request.resource.data.id is string && request.resource.data.at is string &&
+          request.resource.data.rate is number && request.resource.data.rate > 0 &&
+          request.resource.data.currency is string && request.resource.data.closed is bool && request.resource.data.countRevision is int &&
+          request.resource.data.productIds is list && request.resource.data.productIds.size() <= 400;
+        allow update: if member(store) && resource.data.closed == false &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['countRevision']) &&
+          request.resource.data.countRevision == resource.data.countRevision + 1;
+      }
+      match /stockCounts/{product} {
+        allow read: if member(store);
+        allow create, update: if member(store) &&
+          request.resource.data.keys().hasOnly(['sessionId', 'count', 'updatedBy', 'at', 'countRevision']) &&
+          request.resource.data.updatedBy == request.auth.uid && nonnegative(request.resource.data.count) &&
+          request.resource.data.at == request.time &&
+          exists(/databases/$(database)/documents/stores/$(store)/products/$(product)) &&
+          get(/databases/$(database)/documents/stores/$(store)/stocktakes/active).data.closed == false &&
+          get(/databases/$(database)/documents/stores/$(store)/stocktakes/active).data.productIds.hasAll([product]) &&
+          request.resource.data.sessionId == get(/databases/$(database)/documents/stores/$(store)/stocktakes/active).data.id &&
+          request.resource.data.countRevision == getAfter(/databases/$(database)/documents/stores/$(store)/stocktakes/active).data.countRevision &&
+          getAfter(/databases/$(database)/documents/stores/$(store)/stocktakes/active).data.countRevision ==
+            get(/databases/$(database)/documents/stores/$(store)/stocktakes/active).data.countRevision + 1;
+      }
+      match /stocktakeCosts/active {
+        allow read: if owner(store);
+        allow create, update: if owner(store) && request.resource.data.keys().hasOnly(['sessionId', 'snapshot']) &&
+          request.resource.data.sessionId is string && request.resource.data.snapshot is map;
+      }
+      match /stocktakeArchive/{session} {
+        allow read: if owner(store);
+        allow create: if owner(store) && request.resource.data.id == session;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
