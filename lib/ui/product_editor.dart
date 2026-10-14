@@ -83,9 +83,11 @@ class _ProductEditorState extends State<ProductEditor> {
   Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (context, _) {
     final units = int.tryParse(pack.text) ?? 1;
     final enteredCost = (double.tryParse(cost.text) ?? 0) / (cartonCost && units > 0 ? units : 1);
-    final sale = s.can('editSalePrice') && fixed ? double.tryParse(manual.text) ?? 0 :
-      s.can('viewCost') && (s.can('editCost') || widget.product?.manualPrice == null) ? enteredCost * (currency == 'SYP' ? 1 : s.settings.rate) *
-      (1 + (general ? s.settings.margin : double.tryParse(margin.text) ?? 0) / 100) : widget.product?.price(s.settings) ?? 0;
+    final base = widget.product;
+    final automaticSale = base == null ? 0.0 : (base.costCurrency == 'SYP' ? base.saleBaseLocal ?? 0 : base.saleBaseUsd * s.settings.rate);
+    final sale = fixed ? (s.can('editSalePrice') ? double.tryParse(manual.text) ?? 0 : base?.manualPrice ?? 0) :
+      s.can('editCost') ? enteredCost * (currency == 'SYP' ? 1 : s.settings.rate) *
+      (1 + (general ? s.settings.margin : double.tryParse(margin.text) ?? 0) / 100) : automaticSale;
     return Scaffold(appBar: AppBar(title: Text(widget.product == null ? 'مادة جديدة' : 'بيانات المادة')),
       body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 600), child: Form(key: form,
         child: ListView(padding: const EdgeInsets.all(20), children: [

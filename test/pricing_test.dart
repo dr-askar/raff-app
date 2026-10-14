@@ -26,6 +26,10 @@ void main() {
       });
     expect(stock.value, 55000); expect(Stocktake.fromJson(stock.toJson()).value, 55000);
   });
+  test('removing a manual-only price without a cost returns to unpriced', () {
+    final manual = const Product(id: 'm', name: 'يدوي').edit(manualPrice: 1000, settings: settings);
+    expect(manual.ready, true); expect(manual.edit(automatic: true, settings: settings).ready, false);
+  });
   test('a new product without cost remains unpriced', () {
     final p = const Product(id: 'p', name: 'جديد').edit(settings: settings);
     expect(p.ready, false);

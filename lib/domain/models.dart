@@ -72,7 +72,8 @@ class Product {
       costUsd: usd, costLocal: local, costCurrency: currency, margin: profit, manualPrice: manual,
       saleBaseUsd: currency == 'USD' ? (usd == null || !reprice ? saleBaseUsd : usd * (1 + (profit ?? settings.margin) / 100)) : 0,
       saleBaseLocal: currency == 'SYP' ? (local == null || !reprice ? saleBaseLocal : local * (1 + (profit ?? settings.margin) / 100)) : null,
-      ready: manual != null || cost != null || (!switched && ready), revision: revision + 1);
+      ready: manual != null || cost != null || (!switched && ready &&
+        !(automatic && this.manualPrice != null && saleBaseUsd == 0 && (saleBaseLocal ?? 0) == 0)), revision: revision + 1);
   }
   void validate() {
     if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id) ||
