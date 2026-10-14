@@ -19,12 +19,45 @@ service cloud.firestore {
         (m.role == 'worker' && m.get('permissions', {}).get(key,
           key in ['useCalculator', 'viewStocktake', 'countStock']) == true));
     }
-    function costEditor(store) { return can(store, 'editCost') && can(store, 'viewCost'); }
+    function costEditor(store) {
+      let m = membership(store);
+      let p = m.get('permissions', {});
+      return signedIn() && m.active == true && (m.role == 'owner' ||
+        (m.role == 'worker' && p.get('editCost', false) && p.get('viewCost', false)));
+    }
     function countAllowed(store) { return can(store, 'viewStocktake') && can(store, 'countStock'); }
     function writer(store) {
-      return owner(store) || can(store, 'addProduct') || can(store, 'deleteProduct') ||
-        can(store, 'editDetails') || can(store, 'editQuantity') || can(store, 'editSalePrice') ||
-        costEditor(store) || can(store, 'editExchangeRate');
+      let m = membership(store);
+      let p = m.get('permissions', {});
+      return signedIn() && m.active == true && (m.role == 'owner' || (m.role == 'worker' &&
+        (p.get('addProduct', false) || p.get('deleteProduct', false) || p.get('editDetails', false) ||
+         p.get('editQuantity', false) || p.get('editSalePrice', false) ||
+         (p.get('editCost', false) && p.get('viewCost', false)) || p.get('editExchangeRate', false))));
+    }
+    function workerCreateProduct(store) {
+      let p = membership(store).get('permissions', {});
+      let d = request.resource.data;
+      let cost = p.get('editCost', false) && p.get('viewCost', false);
+      return p.get('addProduct', false) &&
+        (p.get('editQuantity', false) || d.quantity == 0) &&
+        (p.get('editSalePrice', false) || d.manualPrice == null) &&
+        (cost || (d.saleBaseUsd == 0 && d.get('saleBaseLocal', null) == null && d.get('costCurrency', 'USD') == 'USD')) &&
+        (cost || p.get('editSalePrice', false) || d.ready == false);
+    }
+    function workerUpdateProduct(store) {
+      let p = membership(store).get('permissions', {});
+      let d = request.resource.data;
+      let changed = d.diff(resource.data).affectedKeys();
+      let cost = p.get('editCost', false) && p.get('viewCost', false);
+      return d.updatedBy == request.auth.uid && d.updatedAt == request.time &&
+        (p.get('editDetails', false) || !changed.hasAny(['name', 'category', 'barcode', 'pack'])) &&
+        (p.get('editQuantity', false) || !changed.hasAny(['quantity'])) &&
+        (p.get('editSalePrice', false) || !changed.hasAny(['manualPrice'])) &&
+        (cost || (d.saleBaseUsd == resource.data.saleBaseUsd &&
+          d.get('saleBaseLocal', null) == resource.data.get('saleBaseLocal', null) &&
+          d.get('costCurrency', 'USD') == resource.data.get('costCurrency', 'USD'))) &&
+        (cost || p.get('editSalePrice', false) || !changed.hasAny(['ready'])) &&
+        (p.get('editDetails', false) || p.get('editQuantity', false) || p.get('editSalePrice', false) || cost);
     }
     function validPermissions(p) {
       return p is map && p.keys().hasOnly(['viewCost', 'editExchangeRate', 'addProduct', 'deleteProduct', 'editDetails', 'editQuantity', 'editSalePrice', 'editCost', 'useCalculator', 'viewStocktake', 'countStock', 'viewHistory']) &&
@@ -86,24 +119,10 @@ service cloud.firestore {
       }
       match /products/{product} {
         allow read: if member(store);
-        allow create: if can(store, 'addProduct') && validProduct() && request.resource.data.revision >= 1 &&
-          (owner(store) || (
-            (can(store, 'editQuantity') || request.resource.data.quantity == 0) &&
-            (can(store, 'editSalePrice') || request.resource.data.manualPrice == null) &&
-            (costEditor(store) || (request.resource.data.saleBaseUsd == 0 &&
-              request.resource.data.get('saleBaseLocal', null) == null && request.resource.data.get('costCurrency', 'USD') == 'USD')) &&
-            (costEditor(store) || can(store, 'editSalePrice') || request.resource.data.ready == false)));
+        allow create: if member(store) && validProduct() && request.resource.data.revision >= 1 &&
+          (owner(store) || workerCreateProduct(store));
         allow update: if member(store) && validProduct() && request.resource.data.revision == resource.data.revision + 1 &&
-          (owner(store) || (
-            request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time &&
-            (can(store, 'editDetails') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['name', 'category', 'barcode', 'pack'])) &&
-            (can(store, 'editQuantity') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['quantity'])) &&
-            (can(store, 'editSalePrice') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['manualPrice'])) &&
-            (costEditor(store) || (request.resource.data.saleBaseUsd == resource.data.saleBaseUsd &&
-              request.resource.data.get('saleBaseLocal', null) == resource.data.get('saleBaseLocal', null) &&
-              request.resource.data.get('costCurrency', 'USD') == resource.data.get('costCurrency', 'USD'))) &&
-            (costEditor(store) || can(store, 'editSalePrice') || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['ready'])) &&
-            (can(store, 'editDetails') || can(store, 'editQuantity') || can(store, 'editSalePrice') || costEditor(store))));
+          (owner(store) || workerUpdateProduct(store));
         allow delete: if can(store, 'deleteProduct') && deletable(store, product);
       }
       match /pricing/{product} {
