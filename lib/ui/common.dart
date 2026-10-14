@@ -25,9 +25,9 @@ class EmptyState extends StatelessWidget {
   final IconData icon;
   const EmptyState(this.title, this.detail, {super.key, this.icon = Icons.inventory_2_outlined});
   @override
-  Widget build(BuildContext context) => Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
+  Widget build(BuildContext context) => Center(child: SingleChildScrollView(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
     Icon(icon, size: 54, color: Theme.of(context).colorScheme.primary), const SizedBox(height: 16),
     Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
     const SizedBox(height: 8), Text(detail, textAlign: TextAlign.center, style: const TextStyle(color: Colors.blueGrey)),
-  ])));
+  ]))));
 }
