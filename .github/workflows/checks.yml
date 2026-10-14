@@ -25,24 +25,23 @@ jobs:
       - run: dart format lib test
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build apk --release --split-per-abi
+      - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
           name: raff-demo-apk
-          path: build/app/outputs/flutter-apk/app-*-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
       - name: Publish direct demo download
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/raff.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/raff-32bit.apk
-          RAFF_ASSETS=(build/app/outputs/flutter-apk/raff.apk build/app/outputs/flutter-apk/raff-32bit.apk)
+          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/raff.apk
+          RAFF_ASSETS=(build/app/outputs/flutter-apk/raff.apk)
           RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
           if gh release view "$RAFF_TAG" >/dev/null 2>&1; then
             gh release upload "$RAFF_TAG" "${RAFF_ASSETS[@]}" --clobber
           else
-            gh release create "$RAFF_TAG" "${RAFF_ASSETS[@]}" --target "$GITHUB_SHA" --prerelease --title "رفّ — نسخة تجريبية ${GITHUB_RUN_NUMBER}" --notes "نسخة محلية لتجربة المواد والأسعار والباركود والجرد. raff.apk للهواتف ARM64، وraff-32bit.apk للهواتف ARM ذات النظام 32 بت. يلزم Android 7 أو أحدث. المزامنة تحتاج إعداد Firebase للمحل. لم تختبر الكاميرا على هاتف حقيقي بعد."
+            gh release create "$RAFF_TAG" "${RAFF_ASSETS[@]}" --target "$GITHUB_SHA" --prerelease --title "رفّ — نسخة تجريبية ${GITHUB_RUN_NUMBER}" --notes "APK واحد موحد لمعالجات ARM64 وARM 32 بت وx86_64. يلزم Android 7 أو أحدث. نسخة محلية لتجربة المواد والأسعار والباركود والجرد. المزامنة تحتاج إعداد Firebase للمحل. لم تختبر الكاميرا على هاتف حقيقي بعد."
           fi
   rules:
     runs-on: ubuntu-latest
