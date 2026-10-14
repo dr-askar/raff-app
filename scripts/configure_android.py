@@ -18,6 +18,10 @@ gradle = Path('android/app/build.gradle.kts')
 if gradle.exists():
     source = gradle.read_text()
     source = source.replace('minSdk = flutter.minSdkVersion', 'minSdk = maxOf(23, flutter.minSdkVersion)')
+    # Keep release builds small via Flutter AOT; defer Android code shrinking until
+    # the native barcode/file plugins have been tested on the shop's phones.
+    if 'isMinifyEnabled = false' not in source:
+        source = source.replace('release {', 'release {\n            isMinifyEnabled = false\n            isShrinkResources = false', 1)
     gradle.write_text(source)
 # Remove the generated counter-app test; this project supplies its own tests.
 test = Path('test/widget_test.dart')

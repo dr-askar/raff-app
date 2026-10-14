@@ -3,6 +3,8 @@ on: [push, pull_request, workflow_dispatch]
 jobs:
   flutter:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -18,11 +20,23 @@ jobs:
       - run: dart format lib test
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build apk --debug
+      - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
           name: raff-demo-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Publish direct demo download
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/raff.apk
+          RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
+          if gh release view "$RAFF_TAG" >/dev/null 2>&1; then
+            gh release upload "$RAFF_TAG" build/app/outputs/flutter-apk/raff.apk --clobber
+          else
+            gh release create "$RAFF_TAG" build/app/outputs/flutter-apk/raff.apk --target "$GITHUB_SHA" --prerelease --title "رفّ — نسخة تجريبية ${GITHUB_RUN_NUMBER}" --notes "نسخة محلية لتجربة المواد والأسعار والباركود والجرد. المزامنة تحتاج إعداد Firebase للمحل. لم تختبر الكاميرا على هاتف حقيقي بعد."
+          fi
   rules:
     runs-on: ubuntu-latest
     steps:
