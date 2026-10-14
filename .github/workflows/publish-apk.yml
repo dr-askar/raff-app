@@ -17,10 +17,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p apk
-          gh run download 38571357368 --repo "$GITHUB_REPOSITORY" --name raff-demo-apk --dir apk
+          gh run download 38594409559 --repo "$GITHUB_REPOSITORY" --name raff-demo-apk --dir apk
           mv apk/app-release.apk apk/raff.apk
-          RAFF_SOURCE=$(gh run view 38571357368 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
-          RAFF_NOTES="APK موحد لمعالجات ARM64 وARM 32 بت وx86_64. Android 7 أو أحدث. نسخة تجريبية محلية؛ المزامنة غير مفعلة قبل إعداد Firebase. مصدر ملف البناء: ${RAFF_SOURCE}. نجحت الاختبارات الـ18 واختبارات الصلاحيات الـ6."
+          RAFF_SOURCE=$(gh run view 38594409559 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
+          RAFF_NOTES="APK موحد لمعالجات ARM64 وARM 32 بت وx86_64. Android 7 أو أحدث. نسخة تجريبية محلية؛ المزامنة غير مفعلة قبل إعداد Firebase. مصدر ملف البناء: ${RAFF_SOURCE}. نجحت الاختبارات الـ26 واختبارات الصلاحيات الـ6."
           if gh release view demo-universal >/dev/null 2>&1; then
             gh release upload demo-universal apk/raff.apk --clobber
             gh release edit demo-universal --notes "$RAFF_NOTES"
