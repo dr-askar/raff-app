@@ -37,6 +37,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/raff.apk
+          RAFF_HEAD=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$RAFF_HEAD" != "$GITHUB_SHA" ]; then
+            echo "A newer commit exists on main. APK retained as an artifact; stale release publishing skipped."
+            exit 0
+          fi
           RAFF_ASSETS=(build/app/outputs/flutter-apk/raff.apk)
           RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
           if gh release view "$RAFF_TAG" >/dev/null 2>&1; then
