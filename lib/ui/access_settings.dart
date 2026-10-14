@@ -82,7 +82,7 @@ class _AccessSettingsState extends State<AccessSettings> {
         ],
         if (!widget.store.cloud) TextButton(onPressed: busy ? null : () async {
           final password = await passwordDialog(context, create: true);
-          if (password != null && mounted) { await perform(context, () => widget.store.setOwnerPassword(password), 'تم تغيير كلمة سر المدير'); }
+          if (password != null && context.mounted) { await perform(context, () => widget.store.setOwnerPassword(password), 'تم تغيير كلمة سر المدير'); }
         }, child: const Text('تغيير كلمة سر المدير')),
       ]))));
 }

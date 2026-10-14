@@ -6,13 +6,18 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/stores/$(store)/members/$(request.auth.uid)).data;
     }
     function member(store) {
-      return signedIn() && membership(store).active == true &&
-        membership(store).role in ['owner', 'worker'];
+      let m = membership(store);
+      return signedIn() && m.active == true && m.role in ['owner', 'worker'];
     }
-    function owner(store) { return member(store) && membership(store).role == 'owner'; }
+    function owner(store) {
+      let m = membership(store);
+      return signedIn() && m.active == true && m.role == 'owner';
+    }
     function can(store, key) {
-      return owner(store) || (member(store) && membership(store).get('permissions', {}).get(key,
-        key in ['useCalculator', 'viewStocktake', 'countStock']) == true);
+      let m = membership(store);
+      return signedIn() && m.active == true && (m.role == 'owner' ||
+        (m.role == 'worker' && m.get('permissions', {}).get(key,
+          key in ['useCalculator', 'viewStocktake', 'countStock']) == true));
     }
     function costEditor(store) { return can(store, 'editCost') && can(store, 'viewCost'); }
     function countAllowed(store) { return can(store, 'viewStocktake') && can(store, 'countStock'); }
@@ -122,7 +127,7 @@ service cloud.firestore {
           getAfter(/databases/$(database)/documents/stores/$(store)/products/$(request.resource.data.productId)).data.barcode != '' &&
           (resource == null || resource.data.productId == request.resource.data.productId);
         allow delete: if (can(store, 'deleteProduct') || can(store, 'editDetails')) &&
-          (!existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)) ||
+          (resource == null || !existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)) ||
            getAfter(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)).data.barcode !=
            get(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)).data.barcode);
       }
