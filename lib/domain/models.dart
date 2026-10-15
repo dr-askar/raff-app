@@ -22,21 +22,21 @@ class StoreSettings {
 class Product {
   final String id, name, category, barcode;
   final int pack, revision;
-  final double quantity, saleBaseUsd;
+  final double quantity, saleBaseUsd, bargainPercent;
   final double? saleBaseLocal;
   final String costCurrency;
   final double? costUsd, costLocal, margin, manualPrice;
   final bool ready;
   const Product({required this.id, required this.name, this.category = 'عام',
     this.barcode = '', this.pack = 1, this.quantity = 0,
-    this.saleBaseUsd = 0, this.saleBaseLocal, this.costCurrency = 'USD',
+    this.saleBaseUsd = 0, this.bargainPercent = 0, this.saleBaseLocal, this.costCurrency = 'USD',
     this.costUsd, this.costLocal, this.margin, this.manualPrice,
     this.ready = false, this.revision = 0});
   factory Product.fromJson(String id, Json j, [Json? pricing]) => Product(
     id: id, name: j['name'] as String? ?? '',
     category: j['category'] as String? ?? 'عام', barcode: j['barcode'] as String? ?? '',
     pack: (j['pack'] as num?)?.toInt() ?? 1,
-    quantity: number(j['quantity']), saleBaseUsd: number(j['saleBaseUsd']),
+    quantity: number(j['quantity']), bargainPercent: number(j['bargainPercent']), saleBaseUsd: number(j['saleBaseUsd']),
     saleBaseLocal: j['saleBaseLocal'] == null ? null : number(j['saleBaseLocal']),
     costCurrency: j['costCurrency'] as String? ?? 'USD',
     costLocal: pricing?['costLocal'] == null ? null : number(pricing?['costLocal']),
@@ -45,16 +45,19 @@ class Product {
     manualPrice: j['manualPrice'] == null ? null : number(j['manualPrice']),
     ready: j['ready'] == true, revision: (j['revision'] as num?)?.toInt() ?? 0);
   Json toJson() => {'name': name, 'category': category, 'barcode': barcode,
-    'pack': pack, 'quantity': quantity, 'saleBaseUsd': saleBaseUsd,
+    'pack': pack, 'quantity': quantity, 'bargainPercent': bargainPercent, 'saleBaseUsd': saleBaseUsd,
     'saleBaseLocal': saleBaseLocal, 'costCurrency': costCurrency,
     'manualPrice': manualPrice, 'ready': ready, 'revision': revision};
+  Json costJson() => {'costUsd': costUsd, 'costLocal': costLocal};
+  Json marginJson() => {'margin': margin};
   Json pricingJson() => {'costUsd': costUsd, 'costLocal': costLocal, 'margin': margin};
   double price(StoreSettings settings) => manualPrice ?? (costCurrency == 'SYP' ? saleBaseLocal ?? 0 : saleBaseUsd * settings.rate);
+  double minimumPrice(StoreSettings settings) => price(settings) * (1 - bargainPercent / 100);
   bool get hasCost => costCurrency == 'SYP' ? costLocal != null : costUsd != null;
   double? localCost(double rate) => costCurrency == 'SYP' ? costLocal : (costUsd == null ? null : costUsd! * rate);
   double effectiveMargin(StoreSettings settings) => margin ?? settings.margin;
   Product edit({String? name, String? category, String? barcode, int? pack,
-    double? quantity, double? costUsd, double? costLocal, String? costCurrency, double? margin, double? manualPrice,
+    double? quantity, double? bargainPercent, double? costUsd, double? costLocal, String? costCurrency, double? margin, double? manualPrice,
     bool useGeneralMargin = false, bool automatic = false,
     required StoreSettings settings}) {
     final currency = costCurrency ?? this.costCurrency;
@@ -65,20 +68,26 @@ class Product {
     final reprice = switched || costUsd != null || costLocal != null || margin != null || useGeneralMargin;
     if (switched && cost == null) { throw const FormatException('أدخل التكلفة عند تغيير عملتها.'); }
     final profit = useGeneralMargin ? null : (margin ?? this.margin);
+    final oldCost = this.costCurrency == 'SYP' ? this.costLocal : this.costUsd;
+    final oldBasis = this.costCurrency == 'SYP' ? saleBaseLocal ?? 0 : saleBaseUsd;
+    final oldFactor = 1 + effectiveMargin(settings) / 100;
+    final explicitMargin = margin != null || useGeneralMargin;
+    final factor = explicitMargin || this.margin != null ? 1 + (profit ?? settings.margin) / 100 :
+      (oldCost != null && oldCost > 0 && ready ? oldBasis / oldCost : oldFactor);
     final manual = automatic ? null : (manualPrice ?? this.manualPrice);
     return Product(id: id, name: name ?? this.name,
       category: category ?? this.category, barcode: barcode ?? this.barcode,
-      pack: pack ?? this.pack, quantity: quantity ?? this.quantity,
+      pack: pack ?? this.pack, quantity: quantity ?? this.quantity, bargainPercent: bargainPercent ?? this.bargainPercent,
       costUsd: usd, costLocal: local, costCurrency: currency, margin: profit, manualPrice: manual,
-      saleBaseUsd: currency == 'USD' ? (usd == null || !reprice ? saleBaseUsd : usd * (1 + (profit ?? settings.margin) / 100)) : 0,
-      saleBaseLocal: currency == 'SYP' ? (local == null || !reprice ? saleBaseLocal : local * (1 + (profit ?? settings.margin) / 100)) : null,
+      saleBaseUsd: currency == 'USD' ? (!reprice ? saleBaseUsd : usd != null ? usd * factor : explicitMargin ? saleBaseUsd * factor / oldFactor : saleBaseUsd) : 0,
+      saleBaseLocal: currency == 'SYP' ? (!reprice ? saleBaseLocal : local != null ? local * factor : explicitMargin ? (saleBaseLocal ?? 0) * factor / oldFactor : saleBaseLocal) : null,
       ready: manual != null || cost != null || (!switched && ready &&
         !(automatic && this.manualPrice != null && saleBaseUsd == 0 && (saleBaseLocal ?? 0) == 0)), revision: revision + 1);
   }
   void validate() {
     if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id) ||
         name.trim().isEmpty || name.length > 120 || category.length > 80 ||
-        barcode.length > 80 || pack < 1 || quantity < 0 || !quantity.isFinite ||
+        barcode.length > 80 || !bargainPercent.isFinite || bargainPercent < 0 || bargainPercent > 100 || pack < 1 || quantity < 0 || !quantity.isFinite ||
         (costUsd != null && (costUsd! < 0 || !costUsd!.isFinite)) ||
         (margin != null && (margin! < 0 || !margin!.isFinite)) ||
         (manualPrice != null && (manualPrice! < 0 || !manualPrice!.isFinite)) ||
@@ -108,8 +117,14 @@ class CartLine {
   final String id, name;
   final double unitPrice;
   int quantity;
+  double discountPercent = 0;
   CartLine({required this.id, required this.name, required this.unitPrice, this.quantity = 1});
-  double get total => unitPrice * quantity;
+  double get sellingPrice => unitPrice * (1 - discountPercent / 100);
+  double get total => sellingPrice * quantity;
+  void setDiscount(double percent, double allowedMaximum) {
+    if (!percent.isFinite || percent < 0 || percent > allowedMaximum || percent > 100) { throw const FormatException('نسبة المساومة تتجاوز الحد المسموح لهذه المادة.'); }
+    discountPercent = percent;
+  }
 }
 
 class Stocktake {

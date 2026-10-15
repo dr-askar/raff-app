@@ -21,7 +21,8 @@ beforeEach(async () => {
       setDoc(doc(db, path('members/worker')), { name: 'عامل', role: 'worker', active: true }),
       setDoc(doc(db, path('members/disabled')), { name: 'معطل', role: 'worker', active: false }),
       setDoc(doc(db, path('products/p')), product),
-      setDoc(doc(db, path('pricing/p')), { costUsd: 1, margin: 20 }),
+      setDoc(doc(db, path('costs/p')), { costUsd: 1, costLocal: null }),
+      setDoc(doc(db, path('margins/p')), { margin: 20 }),
       setDoc(doc(db, path('settings/current')), { rate: 10000, margin: 20, currency: 'ل.س', revision: 0 }),
       setDoc(doc(db, path('stocktakes/active')), { id: 'session', at: '2026-10-14', rate: 10000, currency: 'ل.س', closed: false, countRevision: 0, productIds: ['p'] }),
     ]);
@@ -35,7 +36,7 @@ test('anonymous and unrelated users cannot read the shop', async () => {
 test('worker reads retail data but not private cost, and cannot edit pricing', async () => {
   const db = env.authenticatedContext('worker').firestore();
   await assertSucceeds(getDoc(doc(db, path('products/p'))));
-  await assertFails(getDoc(doc(db, path('pricing/p'))));
+  await assertFails(getDoc(doc(db, path('costs/p'))));
   await assertFails(updateDoc(doc(db, path('products/p')), { quantity: 99, revision: 2 }));
   await assertFails(updateDoc(doc(db, path('settings/current')), { rate: 2 }));
 });
@@ -46,7 +47,7 @@ test('worker cannot promote themselves or join another shop', async () => {
 });
 test('owner can edit pricing with incremented revision; stale writes fail', async () => {
   const db = env.authenticatedContext('owner').firestore();
-  await assertSucceeds(getDoc(doc(db, path('pricing/p'))));
+  await assertSucceeds(getDoc(doc(db, path('costs/p'))));
   await assertSucceeds(updateDoc(doc(db, path('products/p')), { quantity: 30, revision: 2 }));
   await assertFails(updateDoc(doc(db, path('products/p')), { quantity: 35, revision: 2 }));
 });
@@ -79,7 +80,7 @@ test('owner assigns permissions; worker cannot grant themselves access', async (
   const owner = env.authenticatedContext('owner').firestore();
   await assertSucceeds(updateDoc(doc(owner, path('members/worker')), { permissions: { viewCost: true, editExchangeRate: true } }));
   const worker = env.authenticatedContext('worker').firestore();
-  await assertSucceeds(getDoc(doc(worker, path('pricing/p'))));
+  await assertSucceeds(getDoc(doc(worker, path('costs/p'))));
   await assertFails(updateDoc(doc(worker, path('members/worker')), { permissions: { deleteProduct: true } }));
   await assertFails(updateDoc(doc(owner, path('members/worker')), { permissions: { editCost: true, viewCost: false } }));
   await assertFails(updateDoc(doc(owner, path('members/worker')), { permissions: { unknown: true } }));
@@ -89,7 +90,7 @@ test('exchange permission cannot change global margin or private costs', async (
   const db = env.authenticatedContext('worker').firestore();
   await assertSucceeds(updateDoc(doc(db, path('settings/current')), { rate: 12000, revision: 1 }));
   await assertFails(updateDoc(doc(db, path('settings/current')), { margin: 50, revision: 2 }));
-  await assertFails(getDoc(doc(db, path('pricing/p'))));
+  await assertFails(getDoc(doc(db, path('costs/p'))));
   await grant({ editExchangeRate: false });
   await assertFails(updateDoc(doc(db, path('settings/current')), { rate: 14000, revision: 2 }));
 });
@@ -101,7 +102,7 @@ test('quantity permission cannot edit names, sale prices or automatic price base
   await assertFails(updateDoc(doc(db, path('products/p')), { ...meta, name: 'تعديل ممنوع', revision: 3 }));
   await assertFails(updateDoc(doc(db, path('products/p')), { ...meta, manualPrice: 9000, revision: 3 }));
   await assertFails(updateDoc(doc(db, path('products/p')), { ...meta, saleBaseUsd: 9, revision: 3 }));
-  await assertFails(setDoc(doc(db, path('pricing/p')), { costUsd: 9, margin: 20 }));
+  await assertFails(setDoc(doc(db, path('costs/p')), { costUsd: 9, margin: 20 }));
 });
 test('adding and deleting require independent permissions and preserve active stocktakes', async () => {
   const db = env.authenticatedContext('worker').firestore();
@@ -115,21 +116,21 @@ test('adding and deleting require independent permissions and preserve active st
   await grant({ deleteProduct: true });
   batch = writeBatch(db); batch.delete(doc(db, path('products/p')));
   await assertFails(batch.commit());
-  batch = writeBatch(db); batch.delete(doc(db, path('products/new'))); batch.delete(doc(db, path('pricing/new')));
+  batch = writeBatch(db); batch.delete(doc(db, path('products/new'))); batch.delete(doc(db, path('costs/new')));
   await assertSucceeds(batch.commit());
 });
 test('SYP costs stay private and cost editing requires both cost permissions', async () => {
   const db = env.authenticatedContext('worker').firestore();
   await grant({ viewCost: true });
-  await assertSucceeds(getDoc(doc(db, path('pricing/p'))));
-  await assertFails(setDoc(doc(db, path('pricing/p')), { costUsd: null, costLocal: 5000, margin: 20 }));
+  await assertSucceeds(getDoc(doc(db, path('costs/p'))));
+  await assertFails(setDoc(doc(db, path('costs/p')), { costUsd: null, costLocal: 5000 }));
   await grant({ viewCost: true, editCost: true });
   const batch = writeBatch(db);
   batch.update(doc(db, path('products/p')), { costCurrency: 'SYP', saleBaseUsd: 0, saleBaseLocal: 6000, revision: 2, updatedBy: 'worker', updatedAt: serverTimestamp() });
-  batch.set(doc(db, path('pricing/p')), { costUsd: null, costLocal: 5000, margin: 20 });
+  batch.set(doc(db, path('costs/p')), { costUsd: null, costLocal: 5000 });
   await assertSucceeds(batch.commit());
   await grant({ viewCost: false, editCost: false });
-  await assertFails(getDoc(doc(db, path('pricing/p'))));
+  await assertFails(getDoc(doc(db, path('costs/p'))));
 });
 test('stocktake visibility and count entry can be revoked independently', async () => {
   const db = env.authenticatedContext('worker').firestore();
@@ -138,4 +139,36 @@ test('stocktake visibility and count entry can be revoked independently', async 
   await grant({ viewStocktake: true, countStock: false });
   await assertSucceeds(getDoc(doc(db, path('stocktakes/active'))));
   await assertFails(updateDoc(doc(db, path('stocktakes/active')), { countRevision: 1 }));
+});
+
+test('cost and margin reads are independent, including legacy bundled documents', async () => {
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), path('pricing/legacy')), { costUsd: 1, margin: 60 }));
+  const db = env.authenticatedContext('worker').firestore();
+  await grant({ viewCost: true });
+  await assertSucceeds(getDoc(doc(db, path('costs/p'))));
+  await assertFails(getDoc(doc(db, path('margins/p'))));
+  await assertFails(getDoc(doc(db, path('pricing/legacy'))));
+  await grant({ viewMargin: true });
+  await assertSucceeds(getDoc(doc(db, path('margins/p'))));
+  await assertFails(getDoc(doc(db, path('costs/p'))));
+  await assertFails(getDoc(doc(db, path('pricing/legacy'))));
+});
+test('profit editing does not grant cost editing or permission to change bargaining limits', async () => {
+  await grant({ viewMargin: true, editMargin: true });
+  const db = env.authenticatedContext('worker').firestore();
+  const batch = writeBatch(db);
+  batch.update(doc(db, path('products/p')), { saleBaseUsd: 1.3, revision: 2, updatedBy: 'worker', updatedAt: serverTimestamp() });
+  batch.set(doc(db, path('margins/p')), { margin: 30 });
+  await assertSucceeds(batch.commit());
+  await assertFails(setDoc(doc(db, path('costs/p')), { costUsd: 5, costLocal: null }));
+  await assertFails(updateDoc(doc(db, path('products/p')), { bargainPercent: 90, revision: 3, updatedBy: 'worker', updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(db, path('products/p')), { costCurrency: 'SYP', revision: 3, updatedBy: 'worker', updatedAt: serverTimestamp() }));
+});
+test('owner alone sets per-item bargaining limits', async () => {
+  const owner = env.authenticatedContext('owner').firestore();
+  await assertSucceeds(updateDoc(doc(owner, path('products/p')), { bargainPercent: 5, revision: 2 }));
+  await assertFails(updateDoc(doc(owner, path('products/p')), { bargainPercent: 101, revision: 3 }));
+  await grant({ editDetails: true, applyBargain: true });
+  const db = env.authenticatedContext('worker').firestore();
+  await assertFails(updateDoc(doc(db, path('products/p')), { bargainPercent: 10, revision: 3, updatedBy: 'worker', updatedAt: serverTimestamp() }));
 });

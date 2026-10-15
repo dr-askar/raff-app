@@ -17,7 +17,7 @@ class ProductEditor extends StatefulWidget {
 }
 class _ProductEditorState extends State<ProductEditor> {
   final form = GlobalKey<FormState>();
-  late final TextEditingController name, category, barcode, pack, quantity, cost, margin, manual;
+  late final TextEditingController name, category, barcode, pack, quantity, cost, margin, manual, bargain;
   bool general = true, fixed = false, cartonCost = false, cartonQuantity = false, busy = false;
   String currency = 'USD';
   AppStore get s => widget.store;
@@ -31,10 +31,11 @@ class _ProductEditorState extends State<ProductEditor> {
     cost = TextEditingController(text: (currency == 'SYP' ? p?.costLocal : p?.costUsd)?.toString() ?? '');
     margin = TextEditingController(text: '${p?.margin ?? s.settings.margin}');
     manual = TextEditingController(text: p?.manualPrice?.toString() ?? '');
+    bargain = TextEditingController(text: '${p?.bargainPercent ?? 0}');
     general = p?.margin == null; fixed = p?.manualPrice != null;
   }
   @override
-  void dispose() { for (final c in [name, category, barcode, pack, quantity, cost, margin, manual]) { c.dispose(); } super.dispose(); }
+  void dispose() { for (final c in [name, category, barcode, pack, quantity, cost, margin, manual, bargain]) { c.dispose(); } super.dispose(); }
   Widget field(TextEditingController c, String label, {bool numeric = false, bool optional = false, bool enabled = true}) => Padding(
     padding: const EdgeInsets.only(bottom: 16), child: TextFormField(controller: c, enabled: enabled && !busy,
       keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
@@ -59,7 +60,8 @@ class _ProductEditorState extends State<ProductEditor> {
         quantity: s.can('editQuantity') ? double.parse(quantity.text) * (cartonQuantity ? units : 1) : null,
         costCurrency: s.can('editCost') ? currency : null,
         costUsd: currency == 'USD' ? unitCost : null, costLocal: currency == 'SYP' ? unitCost : null,
-        margin: s.can('editCost') && !general ? double.parse(margin.text) : null, useGeneralMargin: s.can('editCost') && general,
+        margin: s.can('editMargin') && !general ? double.parse(margin.text) : null, useGeneralMargin: s.can('editMargin') && general,
+        bargainPercent: s.owner ? double.parse(bargain.text) : null,
         manualPrice: s.can('editSalePrice') && fixed ? double.parse(manual.text) : null,
         automatic: s.can('editSalePrice') && !fixed, settings: s.settings);
       await s.saveProduct(p, expectedRevision: widget.product?.revision);
@@ -82,13 +84,26 @@ class _ProductEditorState extends State<ProductEditor> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(listenable: s, builder: (context, _) {
     final units = int.tryParse(pack.text) ?? 1;
-    final enteredCost = (double.tryParse(cost.text) ?? 0) / (cartonCost && units > 0 ? units : 1);
     final base = widget.product;
-    final automaticSale = base == null ? 0.0 : (base.costCurrency == 'SYP' ? base.saleBaseLocal ?? 0 : base.saleBaseUsd * s.settings.rate);
-    final sale = fixed ? (s.can('editSalePrice') ? double.tryParse(manual.text) ?? 0 : base?.manualPrice ?? 0) :
-      s.can('editCost') ? enteredCost * (currency == 'SYP' ? 1 : s.settings.rate) *
-      (1 + (general ? s.settings.margin : double.tryParse(margin.text) ?? 0) / 100) : automaticSale;
+    final rawCost = s.can('editCost') ? double.tryParse(cost.text) : null;
+    final unitCost = rawCost == null ? null : rawCost / (cartonCost && units > 0 ? units : 1);
+    double sale = base?.price(s.settings) ?? 0;
+    try {
+      sale = (base ?? Product(id: 'preview', name: name.text)).edit(
+        costCurrency: s.can('editCost') ? currency : null,
+        costUsd: currency == 'USD' ? unitCost : null, costLocal: currency == 'SYP' ? unitCost : null,
+        margin: s.can('editMargin') && !general ? double.tryParse(margin.text) : null,
+        useGeneralMargin: s.can('editMargin') && general,
+        manualPrice: s.can('editSalePrice') && fixed ? double.tryParse(manual.text) : null,
+        automatic: s.can('editSalePrice') && !fixed, settings: s.settings).price(s.settings);
+    } on FormatException { /* Keep the previous price until cost is entered. */ }
     return Scaffold(appBar: AppBar(title: Text(widget.product == null ? 'مادة جديدة' : 'بيانات المادة')),
+      bottomNavigationBar: SafeArea(child: Padding(padding: const EdgeInsets.all(12), child: Row(children: [
+        if (widget.product == null ? s.can('addProduct') : s.canEditProduct) Expanded(child: FilledButton(onPressed: busy ? null : save, child: Text(busy ? 'جارٍ الحفظ…' : 'حفظ المادة'))),
+        if (widget.product != null && s.can('deleteProduct')) ...[
+          const SizedBox(width: 8), OutlinedButton.icon(onPressed: busy ? null : delete, icon: const Icon(Icons.delete_outline), label: const Text('حذف مادة'), style: OutlinedButton.styleFrom(foregroundColor: Colors.red.shade700)),
+        ],
+      ]))),
       body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 600), child: Form(key: form,
         child: ListView(padding: const EdgeInsets.all(20), children: [
           field(name, 'اسم المادة', enabled: details), field(category, 'التصنيف', optional: true, enabled: details),
@@ -104,18 +119,21 @@ class _ProductEditorState extends State<ProductEditor> {
             if (s.can('editCost')) SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('إدخال تكلفة الكرتونة'), value: cartonCost, onChanged: busy ? null : (v) => setState(() => cartonCost = v)),
             const SizedBox(height: 12), field(cost, 'تكلفة ${cartonCost ? 'الكرتونة' : 'القطعة'} ${currency == 'SYP' ? 'بالسوري' : 'بالدولار'}', numeric: true, optional: true, enabled: s.can('editCost')),
             const Text('التكلفة بالسوري لا تتغير مع سعر الدولار. ترك التكلفة فارغة يحافظ على القيمة السابقة.'),
-            SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('استخدام نسبة الربح العامة'), subtitle: Text('${s.settings.margin}% زيادة على التكلفة'), value: general, onChanged: busy || !s.can('editCost') ? null : (v) => setState(() => general = v)),
-            if (!general) field(margin, 'نسبة الربح الخاصة %', numeric: true, enabled: s.can('editCost')),
+          ],
+          if (s.can('viewMargin')) ...[
+            SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('استخدام نسبة الربح العامة'), subtitle: Text('${s.settings.margin}% زيادة على التكلفة'), value: general, onChanged: busy || !s.can('editMargin') ? null : (v) => setState(() => general = v)),
+            if (!general) field(margin, 'نسبة الربح الخاصة %', numeric: true, enabled: s.can('editMargin')),
           ],
           if (s.can('editSalePrice')) ...[
             SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('سعر بيع ثابت يدوياً'), subtitle: const Text('يبقى ثابتاً عند تغيير سعر الصرف'), value: fixed, onChanged: busy ? null : (v) => setState(() => fixed = v)),
             if (fixed) field(manual, 'سعر القطعة بالعملة المحلية', numeric: true),
           ],
+          if (s.owner) field(bargain, 'نسبة المساومة % — من 0 إلى 100', numeric: true),
+          if (!s.owner) Text('نسبة المساومة المسموحة: ${money(base?.bargainPercent ?? 0)}%'),
+          const Text('المساومة تخفيض للزبون في السلة فقط، ولا تغيّر سعر الصنف المحفوظ.'),
           Card(color: const Color(0xffe3eef9), child: Padding(padding: const EdgeInsets.all(20), child: Column(children: [
             const Text('معاينة سعر القطعة'), Text('${money(sale)} ${s.settings.currency}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
           ]))), const SizedBox(height: 20),
-          if (widget.product == null ? s.can('addProduct') : s.canEditProduct) FilledButton(onPressed: busy ? null : save, child: Padding(padding: const EdgeInsets.all(14), child: Text(busy ? 'جارٍ الحفظ…' : 'حفظ المادة'))),
-          if (widget.product != null && s.can('deleteProduct')) TextButton.icon(onPressed: busy ? null : delete, icon: const Icon(Icons.delete_outline), label: const Text('حذف الصنف'), style: TextButton.styleFrom(foregroundColor: Colors.red.shade700)),
         ])))));
   });
 }

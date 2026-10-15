@@ -116,7 +116,7 @@ class _HomeState extends State<Home> {
     child: Row(children: [Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('سعر صرف الدولار', style: TextStyle(color: Colors.white70)), const SizedBox(height: 6),
       Text('${money(s.settings.rate)} ${s.settings.currency}', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-      Text('${s.products.length} مادة${s.can('viewCost') ? ' • ربح عام ${money(s.settings.margin)}%' : ''}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+      Text('${s.products.length} مادة${s.can('viewMargin') ? ' • ربح عام ${money(s.settings.margin)}%' : ''}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
     ])), if (s.can('editExchangeRate')) IconButton.filledTonal(tooltip: 'تعديل الصرف', onPressed: busy ? null : () async {
       final n = await numberDialog('سعر صرف الدولار', 'السعر الجديد', initial: s.settings.rate);
       if (n != null && mounted && await confirm(context, 'تحديث الأسعار التلقائية', 'تتغير الأسعار التلقائية وفق الصرف ${money(n)}. الأسعار الثابتة تبقى كما هي.')) {
@@ -153,19 +153,37 @@ class _HomeState extends State<Home> {
             title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Padding(padding: const EdgeInsets.only(top: 6), child: Text('${p.category} • ${money(p.quantity)} قطعة • الكرتونة ${p.pack}\n${p.manualPrice == null ? 'سعر تلقائي' : 'سعر ثابت'}${s.can('viewCost') && p.hasCost ? ' • تكلفة القطعة ${money(p.costCurrency == 'SYP' ? p.costLocal! : p.costUsd!)} ${p.costCurrency == 'SYP' ? 'ل.س' : '\$'}' : ''}')),
             isThreeLine: true,
-            trailing: Text(p.ready ? '${money(p.price(s.settings))}\n${s.settings.currency}' : 'يحتاج\nتسعيراً', textAlign: TextAlign.center,
-              style: TextStyle(color: p.ready ? Theme.of(context).colorScheme.primary : Colors.orange.shade800, fontWeight: FontWeight.bold)),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(p.ready ? '${money(p.price(s.settings))}\n${s.settings.currency}' : 'يحتاج\nتسعيراً', textAlign: TextAlign.center,
+                style: TextStyle(color: p.ready ? Theme.of(context).colorScheme.primary : Colors.orange.shade800, fontWeight: FontWeight.bold)),
+              if (s.can('deleteProduct')) IconButton(tooltip: 'حذف مادة', onPressed: busy ? null : () => deleteMaterial(p), icon: Icon(Icons.delete_outline, color: Colors.red.shade700)),
+            ]),
             onTap: busy ? null : () { if (s.canEditProduct || s.can('deleteProduct')) { editProduct(context, s, product: p); } else { productDetails(p); } },
           ));
         })),
       if (s.owner && rows.isNotEmpty) TextButton(onPressed: () => setState(() => selected.addAll(rows.map((p) => p.id))), child: const Text('تحديد جميع نتائج البحث')),
     ]);
   }
+  Future<void> deleteMaterial(Product p) async {
+    if (!await confirm(context, 'حذف مادة', 'هل تريد حذف «${p.name}»؟ يبقى سجل تغييراته محفوظاً.')) { return; }
+    await action(() async {
+      await s.deleteProduct(p);
+      selected.remove(p.id);
+      if (!s.products.any((item) => item.category == category)) { category = 'الكل'; }
+    }, 'تم حذف المادة');
+  }
+  Future<void> bargain(CartLine line) async {
+    final p = s.findId(line.id); if (p == null || !s.can('applyBargain')) { return; }
+    final percent = await numberDialog('مساومة: ${line.name}', 'نسبة التخفيض، الحد الأقصى ${money(p.bargainPercent)}%', initial: line.discountPercent);
+    if (percent == null || !mounted) { return; }
+    await action(() async { s.applyBargain(line, percent); }, 'تم تطبيق المساومة على السلة');
+  }
+
   Future<void> productDetails(Product product) => showDialog(context: context, builder: (ctx) =>
     ListenableBuilder(listenable: s, builder: (ctx, _) {
       final p = s.findId(product.id);
       return AlertDialog(title: Text(p?.name ?? 'الصنف محذوف'),
-        content: p == null ? null : Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${p.pack} قطعة\nالمتوفر: ${money(p.quantity)} قطعة\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}${s.can('viewCost') && p.hasCost ? '\nتكلفة القطعة: ${money(p.localCost(s.settings.rate)!)} ل.س\nالربح: ${money(p.effectiveMargin(s.settings))}%' : ''}'),
+        content: p == null ? null : Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${p.pack} قطعة\nالمتوفر: ${money(p.quantity)} قطعة\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}${s.can('viewCost') && p.hasCost ? '\nتكلفة القطعة: ${money(p.localCost(s.settings.rate)!)} ل.س' : ''}${s.can('viewMargin') ? '\nنسبة الربح: ${money(p.effectiveMargin(s.settings))}%' : ''}\nنسبة المساومة: ${money(p.bargainPercent)}%'),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))]);
     }));
 
@@ -180,7 +198,9 @@ class _HomeState extends State<Home> {
     }
   }
 
-  Widget basket() => !s.can('useCalculator') ? const EmptyState('حساب الزبون مقفل', 'اطلب من صاحب المحل تفعيل الصلاحية.') : Column(children: [
+  Widget basket() {
+    final total = s.basketTotal(cart);
+    return !s.can('useCalculator') ? const EmptyState('حساب الزبون مقفل', 'اطلب من صاحب المحل تفعيل الصلاحية.') : Column(children: [
     const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4), child: Align(alignment: AlignmentDirectional.centerStart,
       child: Text('حساب الزبون', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)))),
     const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('امسح المادة، أو ابحث واضغط لإضافتها. السلة لا تخصم المخزون.')),
@@ -191,7 +211,8 @@ class _HomeState extends State<Home> {
       padding: const EdgeInsets.all(16), itemCount: cart.length, itemBuilder: (context, i) {
         final line = cart[i]; return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [
           Row(children: [Expanded(child: Text(line.name, style: const TextStyle(fontWeight: FontWeight.bold))), Text('${money(line.total)} ${s.settings.currency}')]),
-          Row(children: [Expanded(child: Text('${money(line.unitPrice)} للقطعة')), IconButton(tooltip: 'إنقاص', onPressed: () => setState(() {
+          if (s.can('applyBargain') && (s.findId(line.id)?.bargainPercent ?? 0) > 0) Align(alignment: AlignmentDirectional.centerStart, child: TextButton.icon(onPressed: busy ? null : () => bargain(line), icon: const Icon(Icons.percent), label: Text('مساومة حتى ${money(s.findId(line.id)!.bargainPercent)}%'))),
+          Row(children: [Expanded(child: Text('${money(line.sellingPrice)} للقطعة${line.discountPercent > 0 ? ' • مساومة ${money(line.discountPercent)}%' : ''}')), IconButton(tooltip: 'إنقاص', onPressed: () => setState(() {
             if (line.quantity > 1) { line.quantity--; } else { cart.removeAt(i); }
           }), icon: const Icon(Icons.remove_circle_outline)),
             Text('${line.quantity}', style: const TextStyle(fontSize: 18)),
@@ -202,7 +223,7 @@ class _HomeState extends State<Home> {
       })),
     Container(padding: const EdgeInsets.all(20), decoration: const BoxDecoration(color: Color(0xffe3eef9), borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [const Expanded(child: Text('المجموع', style: TextStyle(fontSize: 20))), Text('${money(cart.fold<double>(0, (sum, l) => sum + l.total))} ${s.settings.currency}', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold))]),
+        Row(children: [const Expanded(child: Text('المجموع', style: TextStyle(fontSize: 20))), Text('${money(total)} ${s.settings.currency}', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold))]),
         const SizedBox(height: 6), const Text('تُثبت أسعار السلة عند الإضافة. تحديثها متاح قبل الحساب.', style: TextStyle(fontSize: 11)),
         Row(children: [Expanded(child: FilledButton.icon(onPressed: () => scan(basket: true), icon: const Icon(Icons.qr_code_scanner), label: const Text('مسح مادة'))),
           const SizedBox(width: 8), TextButton(onPressed: cart.isEmpty ? null : () async {
@@ -220,6 +241,8 @@ class _HomeState extends State<Home> {
         }, child: const Text('تحديث أسعار السلة')),
       ])),
   ]);
+
+  }
 
   Widget inventory() {
     if (!s.can('viewStocktake')) { return const EmptyState('الجرد مقفل', 'اطلب من صاحب المحل تفعيل الصلاحية.'); }
@@ -299,7 +322,7 @@ class _HomeState extends State<Home> {
         trailing: Text('${money(h.before)}\n↓ ${money(h.after)}')))),
     ],
     if (!s.owner) const Padding(padding: EdgeInsets.all(24), child: Text('الميزات المتاحة تحددها صلاحياتك. اطلب من صاحب المحل تغييرها عند الحاجة.')),
-    const SizedBox(height: 24), const Center(child: Text('رفّ • نسخة أولية 0.2.0', style: TextStyle(color: Colors.blueGrey))),
+    const SizedBox(height: 24), const Center(child: Text('رفّ • نسخة أولية 0.3.0', style: TextStyle(color: Colors.blueGrey))),
   ]);
 
   Future<void> currencyDialog() async {

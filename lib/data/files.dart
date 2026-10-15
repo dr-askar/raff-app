@@ -4,6 +4,7 @@ import 'package:excel/excel.dart';
 import 'package:share_plus/share_plus.dart' show Share;
 import 'package:cross_file/cross_file.dart';
 import '../domain/models.dart';
+import 'xlsx_values.dart';
 
 class ImportPlan {
   final List<Product> products;
@@ -25,12 +26,12 @@ class StoreFiles {
     final sheet = book['Products'];
     book.delete('Sheet1');
     sheet.appendRow(['id', 'name', 'barcode', 'category', 'pack', 'quantity', 'cost_usd',
-      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp'].map(TextCellValue.new).toList());
+      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent'].map(TextCellValue.new).toList());
     for (final p in products) {
       sheet.appendRow([TextCellValue(p.id), TextCellValue(p.name), TextCellValue(p.barcode), TextCellValue(p.category),
         IntCellValue(p.pack), DoubleCellValue(p.quantity), p.costUsd == null ? null : DoubleCellValue(p.costUsd!),
         p.margin == null ? null : DoubleCellValue(p.margin!), p.manualPrice == null ? null : DoubleCellValue(p.manualPrice!),
-        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!)]);
+        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent)]);
     }
     return book.encode()!;
   }
@@ -52,7 +53,7 @@ class StoreFiles {
   }
 
   static ImportPlan preview(List<int> bytes, List<Product> existing, StoreSettings settings, String Function() newId) {
-    final book = Excel.decodeBytes(bytes);
+    final book = Excel.decodeBytes(normalizeXlsxValues(bytes));
     if (book.tables.isEmpty) { throw const FormatException('ملف Excel فارغ.'); }
     final sheet = book.tables['Products'] ?? book.tables.values.first;
     if (sheet.rows.isEmpty) { throw const FormatException('لا توجد صفوف للاستيراد.'); }
@@ -63,7 +64,7 @@ class StoreFiles {
       'باركود': 'barcode', 'رقم الباركود': 'barcode', 'الفئة': 'category',
       'التعبئة': 'pack', 'الكمية': 'quantity', 'التكلفة': 'cost_usd',
       'تكلفة بالسوري': 'cost_syp', 'رأس المال بالسوري': 'cost_syp', 'عملة التكلفة': 'cost_currency',
-      'نسبة الربح': 'margin_percent', 'سعر ثابت': 'manual_price',
+      'نسبة المساومة': 'bargain_percent', 'نسبة الربح': 'margin_percent', 'سعر ثابت': 'manual_price',
     };
     final headers = sheet.rows.first.map((c) {
       final s = (c?.value?.toString() ?? '').replaceAll(RegExp('[\u200e\u200f\ufeff]'), '').trim().toLowerCase();
@@ -124,7 +125,7 @@ class StoreFiles {
         final base = old ?? Product(id: importedId ?? newId(), name: name!);
         final p = base.edit(name: name, barcode: barcode, category: field('category'),
           pack: pack?.toInt(), quantity: numeric('quantity'), costUsd: usd, costLocal: local, costCurrency: currency,
-          margin: numeric('margin_percent'), manualPrice: numeric('manual_price'), settings: settings);
+          bargainPercent: numeric('bargain_percent'), margin: numeric('margin_percent'), manualPrice: numeric('manual_price'), settings: settings);
         p.validate();
         planned.add(p); working.removeWhere((e) => e.id == p.id); working.add(p);
         if (old == null) { added++; } else { updated++; }

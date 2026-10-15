@@ -11,6 +11,17 @@ List<int> workbook(List<List<CellValue?>> rows) {
   return e.encode()!;
 }
 void main() {
+  test('mobile editor decimal integers and built-in format definitions no longer stop import', () {
+    final raw = base64Decode(File('test/fixtures/mobile_editor.base64').readAsStringSync().trim());
+    expect(() => Excel.decodeBytes(raw), throwsA(anything));
+    var n = 0;
+    final plan = StoreFiles.preview(raw, [], const StoreSettings(rate: 5000, margin: 8), () => 'new${n++}');
+    expect(plan.warnings, isEmpty); expect(plan.added, 5);
+    expect(plan.products.map((p) => p.pack), [12, 10, 6, 10, 10]);
+    expect(plan.products.last.name, 'Added B'); expect(plan.products.last.barcode, isEmpty);
+    expect(plan.products.last.manualPrice, 9000); expect(plan.products.first.costUsd, 0.75);
+  });
+
   const settings = StoreSettings(rate: 10000, margin: 20);
   test('mixed-currency Excel export roundtrip and SYP-only imports work', () {
     final local = const Product(id: 'local', name: 'محلي').edit(costCurrency: 'SYP', costLocal: 5000, settings: settings);

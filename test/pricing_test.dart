@@ -2,6 +2,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:raff/domain/models.dart';
 
 void main() {
+  test('profit can be edited without loading cost and cost edits preserve a hidden profit', () {
+    const settings = StoreSettings(rate: 10000, margin: 20);
+    final hiddenCost = Product.fromJson('p', {'name': 'p', 'saleBaseUsd': 1.5, 'ready': true}, {'margin': 50});
+    expect(hiddenCost.edit(margin: 25, settings: settings).price(settings), 12500);
+    final hiddenMargin = Product.fromJson('p', {'name': 'p', 'saleBaseUsd': 1.5, 'ready': true}, {'costUsd': 1});
+    expect(hiddenMargin.edit(costUsd: 2, settings: settings).price(settings), 30000);
+  });
+  test('bargaining is bounded and changes only the cart total', () {
+    final p = const Product(id: 'p', name: 'p', manualPrice: 10000, ready: true, bargainPercent: 5);
+    final line = CartLine(id: p.id, name: p.name, unitPrice: p.price(const StoreSettings()), quantity: 2);
+    line.setDiscount(5, p.bargainPercent); expect(line.total, 19000);
+    expect(p.price(const StoreSettings()), 10000); expect(p.minimumPrice(const StoreSettings()), 9500);
+    expect(() => line.setDiscount(5.01, p.bargainPercent), throwsFormatException);
+    expect(() => const Product(id: 'x', name: 'x', bargainPercent: 101).validate(), throwsFormatException);
+  });
+
   const settings = StoreSettings(rate: 10000, margin: 20);
   test('automatic prices follow exchange rate; fixed prices remain fixed', () {
     final p = const Product(id: 'p', name: 'حليب').edit(costUsd: 2, settings: settings);

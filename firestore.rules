@@ -31,36 +31,39 @@ service cloud.firestore {
       let p = m.get('permissions', {});
       return signedIn() && m.active == true && (m.role == 'owner' || (m.role == 'worker' &&
         (p.get('addProduct', false) || p.get('deleteProduct', false) || p.get('editDetails', false) ||
-         p.get('editQuantity', false) || p.get('editSalePrice', false) ||
+         p.get('editQuantity', false) || p.get('editSalePrice', false) || p.get('editMargin', false) ||
          (p.get('editCost', false) && p.get('viewCost', false)) || p.get('editExchangeRate', false))));
     }
     function workerCreateProduct(store) {
       let p = membership(store).get('permissions', {});
       let d = request.resource.data;
       let cost = p.get('editCost', false) && p.get('viewCost', false);
-      return p.get('addProduct', false) &&
+      let profit = p.get('editMargin', false) && p.get('viewMargin', false);
+      return p.get('addProduct', false) && d.get('bargainPercent', 0) == 0 &&
         (p.get('editQuantity', false) || d.quantity == 0) &&
         (p.get('editSalePrice', false) || d.manualPrice == null) &&
-        (cost || (d.saleBaseUsd == 0 && d.get('saleBaseLocal', null) == null && d.get('costCurrency', 'USD') == 'USD')) &&
-        (cost || p.get('editSalePrice', false) || d.ready == false);
+        (cost || profit || (d.saleBaseUsd == 0 && d.get('saleBaseLocal', null) == null && d.get('costCurrency', 'USD') == 'USD')) &&
+        (cost || profit || p.get('editSalePrice', false) || d.ready == false);
     }
     function workerUpdateProduct(store) {
       let p = membership(store).get('permissions', {});
       let d = request.resource.data;
       let changed = d.diff(resource.data).affectedKeys();
       let cost = p.get('editCost', false) && p.get('viewCost', false);
+      let profit = p.get('editMargin', false) && p.get('viewMargin', false);
       return d.updatedBy == request.auth.uid && d.updatedAt == request.time &&
+        d.get('bargainPercent', 0) == resource.data.get('bargainPercent', 0) &&
         (p.get('editDetails', false) || !changed.hasAny(['name', 'category', 'barcode', 'pack'])) &&
         (p.get('editQuantity', false) || !changed.hasAny(['quantity'])) &&
         (p.get('editSalePrice', false) || !changed.hasAny(['manualPrice'])) &&
-        (cost || (d.saleBaseUsd == resource.data.saleBaseUsd &&
-          d.get('saleBaseLocal', null) == resource.data.get('saleBaseLocal', null) &&
-          d.get('costCurrency', 'USD') == resource.data.get('costCurrency', 'USD'))) &&
-        (cost || p.get('editSalePrice', false) || !changed.hasAny(['ready'])) &&
-        (p.get('editDetails', false) || p.get('editQuantity', false) || p.get('editSalePrice', false) || cost);
+        (cost || d.get('costCurrency', 'USD') == resource.data.get('costCurrency', 'USD')) &&
+        (cost || profit || (d.saleBaseUsd == resource.data.saleBaseUsd &&
+          d.get('saleBaseLocal', null) == resource.data.get('saleBaseLocal', null))) &&
+        (cost || profit || p.get('editSalePrice', false) || !changed.hasAny(['ready'])) &&
+        (p.get('editDetails', false) || p.get('editQuantity', false) || p.get('editSalePrice', false) || p.get('editMargin', false) || cost);
     }
     function validPermissions(p) {
-      return p is map && p.keys().hasOnly(['viewCost', 'editExchangeRate', 'addProduct', 'deleteProduct', 'editDetails', 'editQuantity', 'editSalePrice', 'editCost', 'useCalculator', 'viewStocktake', 'countStock', 'viewHistory']) &&
+      return p is map && p.keys().hasOnly(['viewCost', 'editExchangeRate', 'addProduct', 'deleteProduct', 'editDetails', 'editQuantity', 'editSalePrice', 'editCost', 'useCalculator', 'viewStocktake', 'countStock', 'viewHistory', 'viewMargin', 'editMargin', 'applyBargain']) &&
         p.get('viewCost', false) is bool &&
         p.get('editExchangeRate', false) is bool &&
         p.get('addProduct', false) is bool &&
@@ -73,6 +76,8 @@ service cloud.firestore {
         p.get('viewStocktake', false) is bool &&
         p.get('countStock', false) is bool &&
         p.get('viewHistory', false) is bool &&
+        p.get('viewMargin', false) is bool && p.get('editMargin', false) is bool && p.get('applyBargain', false) is bool &&
+        (!p.get('editMargin', false) || p.get('viewMargin', false)) &&
         (!p.get('editCost', false) || p.get('viewCost', false)) &&
         (!p.get('countStock', false) || p.get('viewStocktake', false));
     }
@@ -84,11 +89,12 @@ service cloud.firestore {
     function validProduct() {
       let d = request.resource.data;
       return d.keys().hasAll(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision']) &&
-        d.keys().hasOnly(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision', 'updatedBy', 'updatedAt', 'costCurrency', 'saleBaseLocal']) &&
+        d.keys().hasOnly(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision', 'updatedBy', 'updatedAt', 'costCurrency', 'saleBaseLocal', 'bargainPercent']) &&
         d.name is string && d.name.size() > 0 && d.name.size() <= 120 &&
         d.category is string && d.category.size() <= 80 && d.barcode is string && d.barcode.size() <= 80 &&
         d.get('costCurrency', 'USD') in ['USD', 'SYP'] &&
         (d.get('saleBaseLocal', null) == null || nonnegative(d.saleBaseLocal)) &&
+        nonnegative(d.get('bargainPercent', 0)) && d.get('bargainPercent', 0) <= 100 &&
         d.pack is int && d.pack >= 1 && d.pack <= 100000 &&
         nonnegative(d.quantity) && nonnegative(d.saleBaseUsd) &&
         (d.manualPrice == null || nonnegative(d.manualPrice)) && d.ready is bool && d.revision is int;
@@ -125,18 +131,29 @@ service cloud.firestore {
           (owner(store) || workerUpdateProduct(store));
         allow delete: if can(store, 'deleteProduct') && deletable(store, product);
       }
-      match /pricing/{product} {
+      match /costs/{product} {
         allow read: if can(store, 'viewCost');
         allow create, update: if costEditor(store) &&
-          request.resource.data.keys().hasOnly(['costUsd', 'costLocal', 'margin']) &&
+          request.resource.data.keys().hasOnly(['costUsd', 'costLocal']) &&
           (request.resource.data.costUsd == null || nonnegative(request.resource.data.costUsd)) &&
           (request.resource.data.get('costLocal', null) == null || nonnegative(request.resource.data.costLocal)) &&
-          (request.resource.data.margin == null || nonnegative(request.resource.data.margin)) &&
           (request.resource.data.costUsd == null || request.resource.data.get('costLocal', null) == null) &&
           existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(product)) &&
           ((getAfter(/databases/$(database)/documents/stores/$(store)/products/$(product)).data.get('costCurrency', 'USD') == 'USD' && request.resource.data.get('costLocal', null) == null) ||
            (getAfter(/databases/$(database)/documents/stores/$(store)/products/$(product)).data.get('costCurrency', 'USD') == 'SYP' && request.resource.data.costUsd == null));
         allow delete: if can(store, 'deleteProduct') && !existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(product));
+      }
+      match /margins/{product} {
+        allow read: if can(store, 'viewMargin');
+        allow create, update: if can(store, 'editMargin') && can(store, 'viewMargin') &&
+          request.resource.data.keys().hasOnly(['margin']) &&
+          (request.resource.data.margin == null || nonnegative(request.resource.data.margin)) &&
+          existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(product));
+        allow delete: if can(store, 'deleteProduct') && !existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(product));
+      }
+      // Only the owner migrates legacy bundled cost/profit documents.
+      match /pricing/{product} {
+        allow read, delete: if owner(store);
       }
       match /barcodes/{code} {
         allow read: if can(store, 'addProduct') || can(store, 'editDetails') || can(store, 'deleteProduct');

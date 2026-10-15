@@ -2,14 +2,17 @@ import 'models.dart';
 
 class WorkerAccess {
   static const labels = <String, String>{
-    'viewCost': 'رؤية تكلفة القطعة ونسبة الربح',
+    'viewCost': 'رؤية رأس مال القطعة',
+    'viewMargin': 'رؤية نسبة الربح',
     'editExchangeRate': 'تغيير سعر صرف الدولار',
     'addProduct': 'إضافة صنف جديد',
     'deleteProduct': 'حذف صنف',
     'editDetails': 'تعديل الاسم والباركود والتعبئة والتصنيف',
     'editQuantity': 'تعديل الكمية المتوفرة',
     'editSalePrice': 'تعديل سعر البيع يدوياً',
-    'editCost': 'تعديل التكلفة وعملتها ونسبة الربح',
+    'editCost': 'تعديل رأس المال وعملته',
+    'editMargin': 'تعديل نسبة الربح',
+    'applyBargain': 'المساومة ضمن النسبة المحددة للمادة',
     'useCalculator': 'استخدام حساب الزبون',
     'viewStocktake': 'رؤية الجرد',
     'countStock': 'إدخال العدد الفعلي أثناء الجرد',
@@ -28,6 +31,8 @@ class WorkerAccess {
     final next = {...toJson(), key: value};
     if (key == 'editCost' && value) { next['viewCost'] = true; }
     if (key == 'viewCost' && !value) { next['editCost'] = false; }
+    if (key == 'editMargin' && value) { next['viewMargin'] = true; }
+    if (key == 'viewMargin' && !value) { next['editMargin'] = false; }
     if (key == 'countStock' && value) { next['viewStocktake'] = true; }
     if (key == 'viewStocktake' && !value) { next['countStock'] = false; }
     return WorkerAccess.fromJson(next);

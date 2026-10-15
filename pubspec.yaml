@@ -1,7 +1,7 @@
 name: raff
 description: رفّ — أسعار وباركود وجرد لمحل صغير
 publish_to: none
-version: 0.2.0+3
+version: 0.3.0+4
 environment:
   sdk: '>=3.5.0 <4.0.0'
 dependencies:
@@ -20,6 +20,8 @@ dependencies:
   cross_file: ^0.3.4+2
   uuid: ^4.5.1
   cryptography: ^2.7.0
+  archive: ^3.6.1
+  xml: ^6.6.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

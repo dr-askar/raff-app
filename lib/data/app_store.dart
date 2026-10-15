@@ -24,11 +24,11 @@ class AppStore extends ChangeNotifier {
   static const _key = 'raff.demo.v1';
   static const _uuid = Uuid();
   final List<StreamSubscription<dynamic>> _subscriptions = [];
-  final Map<String, Json> _public = {}, _pricing = {};
+  final Map<String, Json> _public = {}, _pricing = {}, _margins = {};
   Json? _stockMeta, _stockCosts;
   final Map<String, Json> _stockCounts = {};
   bool _stockReady = false;
-  bool _productsReady = false, _pricingReady = false, _settingsReady = false;
+  bool _productsReady = false, _pricingReady = false, _marginsReady = false, _settingsReady = false;
   final Map<String, SnapshotMetadata> _metadataSources = {};
   List<Product> products = [];
   List<PriceChange> history = [];
@@ -41,7 +41,7 @@ class AppStore extends ChangeNotifier {
   DateTime? _adminUntil, _retryAfter;
   int _passwordFailures = 0;
   bool can(String permission) => usable && (owner || workerAccess.allows(permission));
-  bool get canEditProduct => owner || ['editDetails', 'editQuantity', 'editSalePrice', 'editCost'].any(can);
+  bool get canEditProduct => owner || ['editDetails', 'editQuantity', 'editSalePrice', 'editCost', 'editMargin'].any(can);
   bool get hasOwnerPassword => cloud || ownerLock.configured;
   void _require(bool allowed) {
     if (!allowed || !usable) { throw const FormatException('صاحب المحل لم يمنحك صلاحية هذه العملية.'); }
@@ -77,6 +77,13 @@ class AppStore extends ChangeNotifier {
     if (cloud) { throw const FormatException('كلمة مرور المدير السحابي هي كلمة مرور حسابه.'); }
     if (ownerLock.configured) { _requireAdmin(); }
     await ownerLock.set(password); _adminUntil = DateTime.now().add(const Duration(minutes: 5)); notifyListeners();
+  }
+  Future<void> changeOwnerPassword(String current, String next, String confirmation) async {
+    _requireOwner();
+    if (next != confirmation) { throw const FormatException('كلمة السر الجديدة وتأكيدها غير متطابقين.'); }
+    if (next.trim().length < 6) { throw const FormatException('كلمة السر الجديدة تحتاج 6 أحرف أو أرقام على الأقل.'); }
+    await authenticateOwner(current);
+    await setOwnerPassword(next);
   }
   void lockWorker() {
     if (cloud) { return; }
@@ -138,17 +145,18 @@ class AppStore extends ChangeNotifier {
     uid = user.uid;
     owner = data['role'] == 'owner';
     workerAccess = WorkerAccess.fromJson(Json.from(data['permissions'] ?? {}));
+    if (owner) { await _migrateLegacyMargins(); }
     actor = data['name'] as String? ?? user.email ?? 'مستخدم';
     error = '';
     _watch(root.collection('members').doc(user.uid).snapshots(), (snap) {
       final m = snap.data();
       if (m == null || m['active'] != true || (m['role'] == 'owner') != owner) {
-        _pricing.clear(); _stockCosts = null; history = []; _rebuild(); _rebuildStock();
+        _pricing.clear(); _margins.clear(); _stockCosts = null; history = []; _rebuild(); _rebuildStock();
         unawaited(FirebaseAuth.instance.signOut());
       } else if (!owner && jsonEncode(workerAccess.toJson()) != jsonEncode(WorkerAccess.fromJson(Json.from(m['permissions'] ?? {})).toJson())) {
         // Clear sensitive state immediately, then resubscribe with the new access.
         workerAccess = WorkerAccess.fromJson(Json.from(m['permissions'] ?? {}));
-        _pricing.clear(); _stockCosts = null; history = []; stocktake = null; _rebuild(); loaded = false;
+        _pricing.clear(); _margins.clear(); _stockCosts = null; history = []; stocktake = null; _rebuild(); loaded = false;
         unawaited(connect(user).catchError((Object e) { error = 'تعذر تحديث الصلاحيات. أعد تسجيل الدخول.'; notifyListeners(); }));
       }
     });
@@ -166,13 +174,21 @@ class AppStore extends ChangeNotifier {
       _metadata('products', snap.metadata);
     });
     if (can('viewCost')) {
-      _watch(root.collection('pricing').snapshots(includeMetadataChanges: true), (snap) {
+      _watch(root.collection('costs').snapshots(includeMetadataChanges: true), (snap) {
         if (!can('viewCost')) { return; }
         _pricing.clear();
         for (final doc in snap.docs) { _pricing[doc.id] = doc.data(); }
         _rebuild();
         _pricingReady = true; _setLoaded();
         _metadata('pricing', snap.metadata);
+      });
+    }
+    if (can('viewMargin')) {
+      _watch(root.collection('margins').snapshots(includeMetadataChanges: true), (snap) {
+        if (!can('viewMargin')) { return; }
+        _margins.clear();
+        for (final doc in snap.docs) { _margins[doc.id] = doc.data(); }
+        _rebuild(); _marginsReady = true; _setLoaded(); _metadata('margins', snap.metadata);
       });
     }
     if (can('viewHistory')) {
@@ -202,6 +218,26 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _migrateLegacyMargins() async {
+    // Legacy bundled documents stay owner-only. New collections separate the
+    // two read permissions without exposing hidden fields to the client.
+    final docs = await root.collection('pricing').get(const GetOptions(source: Source.server));
+    for (final doc in docs.docs) {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final current = await tx.get(doc.reference);
+        final marginRef = root.collection('margins').doc(doc.id);
+        final costRef = root.collection('costs').doc(doc.id);
+        final marginDoc = await tx.get(marginRef);
+        final costDoc = await tx.get(costRef);
+        final values = current.data();
+        if (values == null) { return; }
+        if (!marginDoc.exists) { tx.set(marginRef, {'margin': values['margin']}); }
+        if (!costDoc.exists) { tx.set(costRef, {'costUsd': values['costUsd'], 'costLocal': values['costLocal']}); }
+        tx.delete(doc.reference);
+      });
+    }
+  }
+
   void _watch<T>(Stream<T> stream, void Function(T) apply) {
     _subscriptions.add(stream.listen((event) {
       apply(event);
@@ -216,7 +252,7 @@ class AppStore extends ChangeNotifier {
     fromCache = _metadataSources.values.any((m) => m.isFromCache);
     pending = _metadataSources.values.any((m) => m.hasPendingWrites);
   }
-  void _setLoaded() { loaded = _productsReady && _settingsReady && (!can('viewCost') || _pricingReady); }
+  void _setLoaded() { loaded = _productsReady && _settingsReady && (!can('viewCost') || _pricingReady) && (!can('viewMargin') || _marginsReady); }
   void _rebuildStock() {
     final j = _stockMeta;
     if (j == null) { stocktake = null; return; }
@@ -230,19 +266,19 @@ class AppStore extends ChangeNotifier {
       (!can('viewCost') || _stockCosts?['sessionId'] == j['id']);
   }
   void _rebuild() {
-    products = _public.entries.map((e) => Product.fromJson(e.key, e.value, _pricing[e.key])).toList()
+    products = _public.entries.map((e) => Product.fromJson(e.key, e.value, {...?_pricing[e.key], ...?_margins[e.key]})).toList()
       ..sort((a, b) => a.name.compareTo(b.name));
   }
   Future<void> disconnect() async {
     for (final s in _subscriptions) { await s.cancel(); }
     _subscriptions.clear();
     if (cloud) {
-      _adminUntil = null; products = []; history = []; _public.clear(); _pricing.clear();
+      _adminUntil = null; products = []; history = []; _public.clear(); _pricing.clear(); _margins.clear();
       stocktake = null; owner = false; loaded = false; uid = null;
       settings = const StoreSettings();
       _stockMeta = null; _stockCosts = null; _stockCounts.clear(); _metadataSources.clear();
       _stockReady = false;
-      _productsReady = false; _pricingReady = false; _settingsReady = false;
+      _productsReady = false; _pricingReady = false; _marginsReady = false; _settingsReady = false;
       fromCache = false; pending = false; error = '';
     }
   }
@@ -273,8 +309,16 @@ class AppStore extends ChangeNotifier {
       if (old != null && !can('editDetails') && (product.name != base.name || product.category != base.category || product.barcode != base.barcode || product.pack != base.pack)) { _require(false); }
       if (!can('editQuantity') && product.quantity != base.quantity) { _require(false); }
       if (!can('editSalePrice') && product.manualPrice != base.manualPrice) { _require(false); }
-      if (!can('editSalePrice') && !can('editCost') && product.ready != base.ready) { _require(false); }
-      if (!can('editCost') && (jsonEncode(product.pricingJson()) != jsonEncode(base.pricingJson()) || product.costCurrency != base.costCurrency || product.saleBaseUsd != base.saleBaseUsd || product.saleBaseLocal != base.saleBaseLocal)) { _require(false); }
+      if (!can('editSalePrice') && !can('editCost') && !can('editMargin') && product.ready != base.ready) { _require(false); }
+      if (product.bargainPercent != base.bargainPercent) { _require(false); }
+      if (!can('editCost') && (jsonEncode(product.costJson()) != jsonEncode(base.costJson()) || product.costCurrency != base.costCurrency)) { _require(false); }
+      if (!can('editMargin') && product.margin != base.margin) { _require(false); }
+      if (!can('editCost') && !can('editMargin') && (product.saleBaseUsd != base.saleBaseUsd || product.saleBaseLocal != base.saleBaseLocal)) { _require(false); }
+      if (can('editCost') && !can('viewMargin') && old != null && old.hasCost &&
+          (old.costCurrency == 'SYP' ? old.costLocal : old.costUsd) == 0 && old.manualPrice == null &&
+          jsonEncode(product.costJson()) != jsonEncode(old.costJson())) {
+        throw const FormatException('تعديل رأس مال كان صفراً يحتاج مراجعة المدير لنسبة الربح.');
+      }
     }
     if (old != null && expectedRevision != null && old.revision != expectedRevision) {
       throw const FormatException('تعدلت المادة. افتحها مجدداً قبل الحفظ.');
@@ -306,10 +350,11 @@ class AppStore extends ChangeNotifier {
         if (previousBarcode.isNotEmpty && previousBarcode != product.barcode) { tx.delete(_barcode(previousBarcode)); }
         if (product.barcode.isNotEmpty && previousBarcode != product.barcode) { tx.set(_barcode(product.barcode), {'productId': product.id}); }
         tx.set(ref, {...product.toJson(), 'updatedBy': uid, 'updatedAt': FieldValue.serverTimestamp()});
-        if (can('editCost')) { tx.set(root.collection('pricing').doc(product.id), product.pricingJson()); }
+        if (can('editCost')) { tx.set(root.collection('costs').doc(product.id), product.costJson()); }
+        if (can('editMargin')) { tx.set(root.collection('margins').doc(product.id), product.marginJson()); }
         tx.set(root.collection('priceChanges').doc(), {...change.toJson(), 'uid': uid});
       });
-      _public[product.id] = product.toJson(); _pricing[product.id] = product.pricingJson();
+      _public[product.id] = product.toJson(); _pricing[product.id] = product.costJson(); _margins[product.id] = product.marginJson();
       _rebuild(); notifyListeners();
     } else {
       products = [...products.where((p) => p.id != product.id), product];
@@ -317,6 +362,20 @@ class AppStore extends ChangeNotifier {
       await _persist(); notifyListeners();
     }
   }
+
+  void applyBargain(CartLine line, double percent) {
+    _require(can('useCalculator') && can('applyBargain'));
+    final product = findId(line.id);
+    if (product == null || !product.ready) { throw const FormatException('المادة غير موجودة أو غير مسعرة.'); }
+    line.setDiscount(percent, product.bargainPercent);
+  }
+  double basketTotal(List<CartLine> lines) => lines.fold<double>(0, (sum, line) {
+    final product = findId(line.id);
+    final allowed = can('applyBargain') && can('useCalculator') && product != null && product.ready ? product.bargainPercent : 0.0;
+    if (!line.discountPercent.isFinite || line.discountPercent < 0) { line.discountPercent = 0; }
+    if (line.discountPercent > allowed) { line.discountPercent = allowed; }
+    return sum + line.total;
+  });
 
   Future<void> deleteProduct(Product product) async {
     _require(can('deleteProduct'));
@@ -333,11 +392,11 @@ class AppStore extends ChangeNotifier {
         final active = await tx.get(root.collection('stocktakes').doc('active'));
         if (doc.data()?['revision'] != product.revision) { throw const FormatException('تغيرت المادة على جهاز آخر.'); }
         if (active.data()?['closed'] == false && (active.data()?['productIds'] as List? ?? []).contains(product.id)) { throw const FormatException('المادة ضمن جرد مفتوح.'); }
-        tx.delete(ref); tx.delete(root.collection('pricing').doc(product.id));
+        tx.delete(ref); tx.delete(root.collection('costs').doc(product.id)); tx.delete(root.collection('margins').doc(product.id));
         if (product.barcode.isNotEmpty) { tx.delete(_barcode(product.barcode)); }
         tx.set(root.collection('priceChanges').doc(), {...change.toJson(), 'uid': uid});
       });
-      _public.remove(product.id); _pricing.remove(product.id); _rebuild();
+      _public.remove(product.id); _pricing.remove(product.id); _margins.remove(product.id); _rebuild();
     } else { products.removeWhere((p) => p.id == product.id); history.insert(0, change); await _persist(); }
     notifyListeners();
   }

@@ -69,7 +69,7 @@ class _AccessSettingsState extends State<AccessSettings> {
   Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('صلاحيات العامل')),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 650), child:
       error != null ? Center(child: Text(error!)) : members == null ? const Center(child: CircularProgressIndicator()) : ListView(padding: const EdgeInsets.all(20), children: [
-        const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('فعّل فقط ما يحتاجه العامل. رؤية التكلفة تشمل نسبة الربح، وتعديلها يحتاج السماح برؤيتها. المدير وحده يغيّر هذه الصلاحيات.'))),
+        const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('فعّل فقط ما يحتاجه العامل. رؤية رأس المال ورؤية نسبة الربح خياران مستقلان. تعديل كل منهما يحتاج السماح برؤيته فقط. نسبة المساومة لكل مادة يحددها المدير وحده. المدير وحده يغيّر هذه الصلاحيات.'))),
         if (members!.isEmpty) const Text('لا يوجد حساب عامل مضاف للمحل. أضفه في Firebase أولاً.'),
         if (members!.isNotEmpty) ...[
           DropdownButtonFormField<String>(initialValue: selected, decoration: const InputDecoration(labelText: 'العامل'),
@@ -80,9 +80,28 @@ class _AccessSettingsState extends State<AccessSettings> {
             onChanged: busy ? null : (value) => setState(() => access = access.withValue(e.key, value))))),
           const SizedBox(height: 16), FilledButton.icon(onPressed: busy ? null : save, icon: const Icon(Icons.lock_outline), label: Text(busy ? 'جارٍ الحفظ…' : 'حفظ الصلاحيات')),
         ],
-        if (!widget.store.cloud) TextButton(onPressed: busy ? null : () async {
-          final password = await passwordDialog(context, create: true);
-          if (password != null && context.mounted) { await perform(context, () => widget.store.setOwnerPassword(password), 'تم تغيير كلمة سر المدير'); }
-        }, child: const Text('تغيير كلمة سر المدير')),
+        if (!widget.store.cloud) TextButton(onPressed: busy ? null : () => changePasswordDialog(context, widget.store), child: const Text('تغيير كلمة سر المدير')),
       ]))));
+}
+
+Future<void> changePasswordDialog(BuildContext context, AppStore store) async {
+  final current = TextEditingController(), next = TextEditingController(), confirmation = TextEditingController();
+  String? error; var busy = false;
+  await showDialog<void>(context: context, barrierDismissible: false, builder: (ctx) => StatefulBuilder(builder: (ctx, change) =>
+    AlertDialog(title: const Text('تغيير كلمة سر المدير'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      TextField(controller: current, obscureText: true, enabled: !busy, decoration: const InputDecoration(labelText: 'كلمة السر الحالية')),
+      const SizedBox(height: 12), TextField(controller: next, obscureText: true, enabled: !busy, decoration: const InputDecoration(labelText: 'كلمة السر الجديدة')),
+      const SizedBox(height: 12), TextField(controller: confirmation, obscureText: true, enabled: !busy, decoration: const InputDecoration(labelText: 'تأكيد كلمة السر الجديدة')),
+      if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: const TextStyle(color: Colors.red))),
+    ])), actions: [TextButton(onPressed: busy ? null : () => Navigator.pop(ctx), child: const Text('رجوع')),
+      FilledButton(onPressed: busy ? null : () async {
+        if (next.text != confirmation.text || next.text.trim().length < 6) { change(() => error = 'تأكيد مطابق وكلمة سر من 6 أحرف أو أرقام على الأقل'); return; }
+        change(() { busy = true; error = null; });
+        try {
+          await store.changeOwnerPassword(current.text, next.text, confirmation.text);
+          if (ctx.mounted && context.mounted) { Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تغيير كلمة سر المدير'))); }
+        } catch (e) { if (ctx.mounted) { change(() { busy = false; error = e is FormatException ? e.message.toString() : 'تعذر تغيير كلمة السر.'; }); } }
+      }, child: Text(busy ? 'جارٍ الحفظ…' : 'تغيير كلمة السر')),
+    ])));
+  Future<void>.delayed(const Duration(milliseconds: 300), () { current.dispose(); next.dispose(); confirmation.dispose(); });
 }
