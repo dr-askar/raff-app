@@ -31,7 +31,7 @@ jobs:
           else
             echo 'APK signature FAILED verification'
           fi
-          "$RAFF_BUILD_TOOLS/aapt" dump badging /tmp/raff-apk/raff.apk | head -25
+          "$RAFF_BUILD_TOOLS/aapt" dump badging /tmp/raff-apk/raff.apk | sed -n '1,25p'
           "$RAFF_BUILD_TOOLS/zipalign" -c -P 16 4 /tmp/raff-apk/raff.apk || true
       - name: Enable hardware acceleration
         run: |
