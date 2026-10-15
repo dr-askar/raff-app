@@ -66,7 +66,10 @@ class _AccessSettingsState extends State<AccessSettings> {
     if (mounted) { setState(() => busy = false); }
   }
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('صلاحيات العامل')),
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('صلاحيات العامل'), actions: [
+      if (!widget.store.cloud) TextButton.icon(onPressed: busy ? null : () => changePasswordDialog(context, widget.store), icon: const Icon(Icons.password), label: const Text('كلمة السر')),
+    ]),
+    bottomNavigationBar: members == null || members!.isEmpty ? null : SafeArea(child: Padding(padding: const EdgeInsets.all(12), child: FilledButton.icon(onPressed: busy ? null : save, icon: const Icon(Icons.lock_outline), label: Text(busy ? 'جارٍ الحفظ…' : 'حفظ الصلاحيات')))),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 650), child:
       error != null ? Center(child: Text(error!)) : members == null ? const Center(child: CircularProgressIndicator()) : ListView(padding: const EdgeInsets.all(20), children: [
         const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('فعّل فقط ما يحتاجه العامل. رؤية رأس المال ورؤية نسبة الربح خياران مستقلان. تعديل كل منهما يحتاج السماح برؤيته فقط. نسبة المساومة لكل مادة يحددها المدير وحده. المدير وحده يغيّر هذه الصلاحيات.'))),
@@ -78,9 +81,7 @@ class _AccessSettingsState extends State<AccessSettings> {
           const SizedBox(height: 14),
           ...WorkerAccess.labels.entries.map((e) => Card(child: SwitchListTile(title: Text(e.value), value: access.allows(e.key),
             onChanged: busy ? null : (value) => setState(() => access = access.withValue(e.key, value))))),
-          const SizedBox(height: 16), FilledButton.icon(onPressed: busy ? null : save, icon: const Icon(Icons.lock_outline), label: Text(busy ? 'جارٍ الحفظ…' : 'حفظ الصلاحيات')),
         ],
-        if (!widget.store.cloud) TextButton(onPressed: busy ? null : () => changePasswordDialog(context, widget.store), child: const Text('تغيير كلمة سر المدير')),
       ]))));
 }
 
