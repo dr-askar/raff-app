@@ -1,0 +1,67 @@
+name: Verify published APK on modern Android
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/check-modern-android.yml', 'scripts/check_apk_native.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  modern:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Android 17
+            api: 37
+            target: google_apis
+            page: any
+          - name: Android 15 with 16KB pages
+            api: 35
+            target: google_apis_ps16k
+            page: 16384
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download and inspect the exact published universal APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir apk
+          gh release download demo-26 --repo "$GITHUB_REPOSITORY" --pattern raff-0.3.1-universal.apk --dir apk
+          echo '8a4f802b2404184e8fb40f6a45cb534f28418bd27891a2fa3a832aad3257bbf2  apk/raff-0.3.1-universal.apk' | sha256sum --check
+          RAFF_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$RAFF_TOOLS/apksigner" verify --verbose --print-certs apk/raff-0.3.1-universal.apk
+          "$RAFF_TOOLS/zipalign" -c -P 16 4 apk/raff-0.3.1-universal.apk
+          python3 scripts/check_apk_native.py apk/raff-0.3.1-universal.apk
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list | sed -n '/system-images;android-37/p; /google_apis_ps16k/p'
+      - name: Enable hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb shell getprop ro.build.version.release
+            adb shell getprop ro.product.cpu.abilist
+            adb shell getconf PAGE_SIZE
+            if [ "${{ matrix.page }}" != "any" ]; then test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "${{ matrix.page }}"; fi
+            adb install -r apk/raff-0.3.1-universal.apk
+            adb logcat -c
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb logcat -b crash -d
+            adb shell pidof com.raffapp.raff
