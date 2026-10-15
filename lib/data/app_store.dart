@@ -369,12 +369,12 @@ class AppStore extends ChangeNotifier {
     if (product == null || !product.ready) { throw const FormatException('المادة غير موجودة أو غير مسعرة.'); }
     line.setDiscount(percent, product.bargainPercent);
   }
-  double basketTotal(List<CartLine> lines) => lines.fold<double>(0, (sum, line) {
+  double basketTotal(List<CartLine> lines) => lines.fold<double>(0, (amount, line) {
     final product = findId(line.id);
     final allowed = can('applyBargain') && can('useCalculator') && product != null && product.ready ? product.bargainPercent : 0.0;
     if (!line.discountPercent.isFinite || line.discountPercent < 0) { line.discountPercent = 0; }
     if (line.discountPercent > allowed) { line.discountPercent = allowed; }
-    return sum + line.total;
+    return amount + line.total;
   });
 
   Future<void> deleteProduct(Product product) async {

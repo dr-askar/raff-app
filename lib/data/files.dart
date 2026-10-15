@@ -53,7 +53,10 @@ class StoreFiles {
   }
 
   static ImportPlan preview(List<int> bytes, List<Product> existing, StoreSettings settings, String Function() newId) {
-    final book = Excel.decodeBytes(normalizeXlsxValues(bytes));
+    late final Excel book;
+    try { book = Excel.decodeBytes(normalizeXlsxValues(bytes)); }
+    on FormatException { rethrow; }
+    catch (_) { throw const FormatException('تعذر قراءة ملف Excel. احفظه بصيغة xlsx وأعد المحاولة؛ تنسيق الملف غير مدعوم أو الملف تالف.'); }
     if (book.tables.isEmpty) { throw const FormatException('ملف Excel فارغ.'); }
     final sheet = book.tables['Products'] ?? book.tables.values.first;
     if (sheet.rows.isEmpty) { throw const FormatException('لا توجد صفوف للاستيراد.'); }
