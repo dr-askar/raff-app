@@ -35,6 +35,7 @@ jobs:
           "$RAFF_TOOLS/aapt" dump badging "$RAFF_APK" | sed -n '1,40p'
           "$RAFF_TOOLS/zipalign" -c -P 16 4 "$RAFF_APK"
           unzip -t "$RAFF_APK" | tail -1
+          python3 scripts/check_apk_native.py "$RAFF_APK"
           sha256sum "$RAFF_APK"
       - uses: actions/upload-artifact@v4
         with:
@@ -62,7 +63,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [24, 30, 35, 36]
+        api: [24, 30, 35, 36, 37]
+        include:
+          - api: 37
+            platform: 36
+            image: '37.0'
+            target: google_apis_ps16k
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -72,6 +78,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Use SDK tools that understand Android 17.0 image metadata
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "cmdline-tools;22.0"
+          set -o pipefail
+          mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/pre-raff-latest"
+          ln -s "$ANDROID_HOME/cmdline-tools/22.0" "$ANDROID_HOME/cmdline-tools/latest"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
       - name: Enable hardware acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -79,13 +93,19 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: ${{ matrix.api }}
-          target: google_apis
+          api-level: ${{ matrix.platform || matrix.api }}
+          system-image-api-level: ${{ matrix.image || matrix.api }}
+          target: ${{ matrix.target || 'google_apis' }}
           arch: x86_64
+          ram-size: 4096M
+          disk-size: 8192M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu ${{ matrix.api == 37 && 'software' || 'swiftshader_indirect' }} -noaudio -no-boot-anim -camera-back none
           script: |
-            adb install -r apk/app-release.apk
+            adb shell getprop ro.build.version.release
+            adb shell getconf PAGE_SIZE
+            if [ "${{ matrix.api }}" = "37" ]; then test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = "37"; test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384"; fi
+            adb install --no-streaming -r apk/app-release.apk
             adb logcat -c
             adb shell am start -W -n com.raffapp.raff/.MainActivity
             sleep 5
@@ -113,4 +133,4 @@ jobs:
           fi
           cp apk/app-release.apk apk/raff-0.3.1-universal.apk
           RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
-          gh release create "$RAFF_TAG" apk/raff-0.3.1-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ 0.3.1 — توافق أندرويد" --notes "ملف موحد ARM32 وARM64 وx86_64. Android 7 أو أحدث. تم فحص التوقيع وتثبيت التطبيق وفتحه على محاكيات Android 7 و11 و15 و16. هذا لا يضمن كل أجهزة الشركات؛ الكاميرا تحتاج تجربة على هاتف حقيقي. نسخة محلية دون مزامنة Firebase مفعّلة. احفظ نسخة بيانات قبل تحديث إصدار قديم."
+          gh release create "$RAFF_TAG" apk/raff-0.3.1-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ 0.3.1 — توافق أندرويد" --notes "ملف موحد ARM32 وARM64 وx86_64. Android 7 أو أحدث. تم فحص التوقيع وتثبيت التطبيق وفتحه على محاكيات Android 7 و11 و15 و16 و17 بوضع 16KB. هذا لا يضمن كل أجهزة الشركات؛ الكاميرا تحتاج تجربة على هاتف حقيقي. نسخة محلية دون مزامنة Firebase مفعّلة. احفظ نسخة بيانات قبل تحديث إصدار قديم."
