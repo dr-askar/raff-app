@@ -39,6 +39,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Use SDK tools that understand Android 17.0 image metadata
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "cmdline-tools;22.0"
+          set -o pipefail
+          mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/pre-raff-latest"
+          ln -s "$ANDROID_HOME/cmdline-tools/22.0" "$ANDROID_HOME/cmdline-tools/latest"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
       - name: Download and inspect the exact published universal APK
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,8 +73,9 @@ jobs:
           ram-size: 4096M
           disk-size: 8192M
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu software -noaudio -no-boot-anim -camera-back none
           script: |
+            if [ "${{ matrix.sdk }}" = "37" ]; then test "$(sed -n 's/^target=//p' "$HOME/.android/avd/test.ini")" = 'android-37.0'; fi
             adb shell getprop ro.build.version.release
             test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = "${{ matrix.sdk }}"
             adb shell df -h /data
