@@ -11,6 +11,16 @@ List<int> workbook(List<List<CellValue?>> rows) {
   return e.encode()!;
 }
 void main() {
+  test('bargaining percentages accept Arabic percent text and survive Excel roundtrip', () {
+    final plan = StoreFiles.preview(workbook([
+      [TextCellValue('اسم المادة'), TextCellValue('نسبة المساومة')],
+      [TextCellValue('مادة'), TextCellValue('٥٪')],
+    ]), [], const StoreSettings(), () => 'bargain');
+    expect(plan.warnings, isEmpty); expect(plan.products.single.bargainPercent, 5);
+    final result = StoreFiles.preview(StoreFiles.productExcel(plan.products, const StoreSettings()), [], const StoreSettings(), () => 'new');
+    expect(result.warnings, isEmpty); expect(result.products.single.bargainPercent, 5);
+  });
+
   test('mobile editor decimal integers and built-in format definitions no longer stop import', () {
     final raw = base64Decode(File('test/fixtures/mobile_editor.base64').readAsStringSync().trim());
     expect(() => Excel.decodeBytes(raw), throwsA(anything));

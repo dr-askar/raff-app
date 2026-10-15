@@ -112,7 +112,7 @@ class StoreFiles {
         if (matched != null && planned.any((p) => p.id == matched.id)) { throw const FormatException('المادة مكررة داخل الملف'); }
         double? numeric(String key) {
           final value = field(key); if (value == null) { return null; }
-          final parsed = double.tryParse(_normalizeNumber(value, percent: key == 'margin_percent'));
+          final parsed = double.tryParse(_normalizeNumber(value, percent: key.endsWith('_percent')));
           if (parsed == null || !parsed.isFinite || parsed < 0) { throw FormatException('قيمة غير صالحة في $key'); }
           return parsed;
         }
