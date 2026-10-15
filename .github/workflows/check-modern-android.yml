@@ -16,11 +16,21 @@ jobs:
       matrix:
         include:
           - name: Android 17
-            api: 37
+            api: 36
+            image: '37.0'
+            sdk: 37
             target: google_apis
             page: any
+          - name: Android 17 with 16KB pages
+            api: 36
+            image: '37.0'
+            sdk: 37
+            target: google_apis_ps16k
+            page: 16384
           - name: Android 15 with 16KB pages
             api: 35
+            image: '35'
+            sdk: 35
             target: google_apis_ps16k
             page: 16384
     steps:
@@ -49,6 +59,7 @@ jobs:
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
+          system-image-api-level: ${{ matrix.image }}
           target: ${{ matrix.target }}
           arch: x86_64
           ram-size: 4096M
@@ -56,6 +67,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             adb shell getprop ro.build.version.release
+            test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = "${{ matrix.sdk }}"
             adb shell getprop ro.product.cpu.abilist
             adb shell getconf PAGE_SIZE
             if [ "${{ matrix.page }}" != "any" ]; then test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "${{ matrix.page }}"; fi
