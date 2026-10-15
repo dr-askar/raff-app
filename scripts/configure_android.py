@@ -12,6 +12,8 @@ for permission in ['android.permission.INTERNET', 'android.permission.CAMERA']:
 if not any(p.get(f'{{{ns}}}name') == 'android.hardware.camera' for p in root.findall('uses-feature')):
     ET.SubElement(root, 'uses-feature', {f'{{{ns}}}name': 'android.hardware.camera', f'{{{ns}}}required': 'false'})
 root.find('application').set(f'{{{ns}}}label', 'رفّ')
+# Extract native libraries during installation for older/OEM installers.
+root.find('application').set(f'{{{ns}}}extractNativeLibs', 'true')
 tree.write(path, encoding='utf-8', xml_declaration=True)
 # Firebase Auth and the camera plugin require API 23 or newer.
 gradle = Path('android/app/build.gradle.kts')
@@ -22,6 +24,25 @@ if gradle.exists():
     # the native barcode/file plugins have been tested on the shop's phones.
     if 'isMinifyEnabled = false' not in source:
         source = source.replace('release {', 'release {\n            isMinifyEnabled = false\n            isShrinkResources = false', 1)
+    # Universal APK: compressed native libraries avoid relying on in-place mmap
+    # support in OEM installers. Keep both Android signature schemes available.
+    if '// Raff installer compatibility' not in source:
+        source += '''
+// Raff installer compatibility
+android {
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+        }
+    }
+}
+'''
     gradle.write_text(source)
 # Remove the generated counter-app test; this project supplies its own tests.
 test = Path('test/widget_test.dart')

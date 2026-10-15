@@ -27,28 +27,19 @@ jobs:
       - run: flutter analyze
       - run: flutter test
       - run: flutter build apk --release
+      - name: Verify APK signatures and contents
+        run: |
+          RAFF_APK=build/app/outputs/flutter-apk/app-release.apk
+          RAFF_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$RAFF_TOOLS/apksigner" verify --verbose --print-certs "$RAFF_APK"
+          "$RAFF_TOOLS/aapt" dump badging "$RAFF_APK" | sed -n '1,40p'
+          "$RAFF_TOOLS/zipalign" -c -P 16 4 "$RAFF_APK"
+          unzip -t "$RAFF_APK" | tail -1
+          sha256sum "$RAFF_APK"
       - uses: actions/upload-artifact@v4
         with:
           name: raff-demo-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-      - name: Publish direct demo download
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/raff.apk
-          RAFF_HEAD=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-          if [ "$RAFF_HEAD" != "$GITHUB_SHA" ]; then
-            echo "A newer commit exists on main. APK retained as an artifact; stale release publishing skipped."
-            exit 0
-          fi
-          RAFF_ASSETS=(build/app/outputs/flutter-apk/raff.apk)
-          RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
-          if gh release view "$RAFF_TAG" >/dev/null 2>&1; then
-            gh release upload "$RAFF_TAG" "${RAFF_ASSETS[@]}" --clobber
-          else
-            gh release create "$RAFF_TAG" "${RAFF_ASSETS[@]}" --target "$GITHUB_SHA" --prerelease --title "رفّ — نسخة تجريبية ${GITHUB_RUN_NUMBER}" --notes "APK واحد موحد لمعالجات ARM64 وARM 32 بت وx86_64. يلزم Android 7 أو أحدث. نسخة محلية لتجربة المواد والأسعار والباركود والجرد. المزامنة تحتاج إعداد Firebase للمحل. لم تختبر الكاميرا على هاتف حقيقي بعد."
-          fi
   rules:
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[publish-only]')
     runs-on: ubuntu-latest
@@ -63,3 +54,63 @@ jobs:
           java-version: '21'
       - run: npm install
       - run: npm run test:rules
+
+  install:
+    needs: flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [24, 30, 35, 36]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-demo-apk
+          path: apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Enable hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r apk/app-release.apk
+            adb logcat -c
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb logcat -b crash -d
+            adb shell pidof com.raffapp.raff
+  publish:
+    needs: [flutter, rules, install]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-demo-apk
+          path: apk
+      - name: Publish verified universal APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RAFF_HEAD=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$RAFF_HEAD" != "$GITHUB_SHA" ]; then
+            echo "Newer commit exists; APK remains available as an artifact."
+            exit 0
+          fi
+          cp apk/app-release.apk apk/raff-0.3.1-universal.apk
+          RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
+          gh release create "$RAFF_TAG" apk/raff-0.3.1-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ 0.3.1 — توافق أندرويد" --notes "ملف موحد ARM32 وARM64 وx86_64. Android 7 أو أحدث. تم فحص التوقيع وتثبيت التطبيق وفتحه على محاكيات Android 7 و11 و15 و16. هذا لا يضمن كل أجهزة الشركات؛ الكاميرا تحتاج تجربة على هاتف حقيقي. نسخة محلية دون مزامنة Firebase مفعّلة. احفظ نسخة بيانات قبل تحديث إصدار قديم."
