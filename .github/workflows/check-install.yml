@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -30,6 +30,7 @@ jobs:
             echo 'APK signature verified'
           else
             echo 'APK signature FAILED verification'
+            exit 1
           fi
           "$RAFF_BUILD_TOOLS/aapt" dump badging /tmp/raff-apk/raff.apk | sed -n '1,25p'
           "$RAFF_BUILD_TOOLS/zipalign" -c -P 16 4 /tmp/raff-apk/raff.apk || true
@@ -47,5 +48,15 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             adb install -r /tmp/raff-apk/raff.apk
-            adb shell monkey -p com.raffapp.raff -c android.intent.category.LAUNCHER 1
+            adb logcat -c
+            adb shell am start -W -n com.raffapp.raff/.MainActivity || true
+            sleep 5
+            adb logcat -b crash -d
+            adb logcat -d -s AndroidRuntime flutter Flutter linker
             adb shell pidof com.raffapp.raff
+      - name: Publish directly downloadable verified file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp /tmp/raff-apk/raff.apk /tmp/raff-apk/raff-0.3.0-verified.apk
+          gh release upload demo-21 /tmp/raff-apk/raff-0.3.0-verified.apk --repo "$GITHUB_REPOSITORY" --clobber
