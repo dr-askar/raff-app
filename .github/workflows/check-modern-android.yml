@@ -63,11 +63,13 @@ jobs:
           target: ${{ matrix.target }}
           arch: x86_64
           ram-size: 4096M
+          disk-size: 8192M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             adb shell getprop ro.build.version.release
             test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = "${{ matrix.sdk }}"
+            adb shell df -h /data
             adb shell getprop ro.product.cpu.abilist
             adb shell getconf PAGE_SIZE
             if [ "${{ matrix.page }}" != "any" ]; then test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "${{ matrix.page }}"; fi
