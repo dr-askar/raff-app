@@ -1,5 +1,7 @@
 # حالة التحقق — 0.3.2
 
+[نجاح نشر الملف المفحوص وتحديث الرابط العام](https://github.com/dr-askar/raff-app/actions/runs/38852864574)
+
 مصدر APK: a1004ce3e5d14eb9daf05adaadf3c191e939de9f.
 
 - [البناء وفحوصات التطبيق وأندرويد 11 و15 و16 و17](https://github.com/dr-askar/raff-app/actions/runs/38850777908): نجح flutter analyze و54 اختبار Flutter و15 اختبار قواعد Firestore.

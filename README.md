@@ -2,7 +2,7 @@
 
 تطبيق Flutter عربي لأندرويد لإدارة أسعار محل صغير، البحث بالباركود، حساب سلة زبون بسرعة، والجرد. الواجهة من اليمين لليسار بألوان زرقاء هادئة.
 
-**هذه نسخة أولية تحتاج تجربة فعلية في المحل قبل الاعتماد اليومي.** يتوفر وضع محلي للتجربة، ووضع Firebase للمزامنة. نجحت اختبارات Flutter الـ54 واختبارات قواعد Firebase الـ15 و`flutter analyze`، وتم بناء APK موحد ونشره، وفُحص تثبيته وفتحه على محاكيات Android 7 و11 و15 و16 و17. راجع [صفحة التنزيل](https://github.com/dr-askar/raff-app/releases/tag/demo-36) و[نجاح نشر الملف](https://github.com/dr-askar/raff-app/actions/runs/38852465680). حالة التحقق مفصلة في `docs/VERIFICATION.md`.
+**هذه نسخة أولية تحتاج تجربة فعلية في المحل قبل الاعتماد اليومي.** يتوفر وضع محلي للتجربة، ووضع Firebase للمزامنة. نجحت اختبارات Flutter الـ54 واختبارات قواعد Firebase الـ15 و`flutter analyze`، وتم بناء APK موحد ونشره، وفُحص تثبيته وفتحه على محاكيات Android 7 و11 و15 و16 و17. راجع [صفحة التنزيل](https://github.com/dr-askar/raff-app/releases/tag/demo-36) و[نجاح نشر الملف](https://github.com/dr-askar/raff-app/actions/runs/38852864574). حالة التحقق مفصلة في `docs/VERIFICATION.md`.
 
 ## تشغيل سريع
 
