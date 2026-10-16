@@ -108,7 +108,7 @@ jobs:
           emulator-options: -no-window -gpu ${{ matrix.api == 37 && 'software' || 'swiftshader_indirect' }} -noaudio -no-boot-anim -camera-back none
           script: |
             adb shell getprop ro.build.version.release
-            adb shell getconf PAGE_SIZE
+            if [ "${{ matrix.api }}" != "24" ]; then adb shell getconf PAGE_SIZE; fi
             if [ "${{ matrix.api }}" = "37" ]; then test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = "37"; test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384"; fi
             adb install --no-streaming -r apk/app-release.apk
             adb logcat -c

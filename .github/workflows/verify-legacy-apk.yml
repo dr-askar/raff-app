@@ -1,5 +1,8 @@
 name: Verify Android 7 and publish the existing tested APK
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-legacy-apk.yml']
   workflow_dispatch:
 permissions:
   actions: read
@@ -20,12 +23,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(gh run view 38850777908 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = a1004ce3e5d14eb9daf05adaadf3c191e939de9f
-          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/38850777908/jobs?per_page=100" --jq '[.jobs[] | select(.name == "flutter" or .name == "rules" or .name == "install (30)" or .name == "install (35)" or .name == "install (36)" or .name == "install (37)")] | (length == 6 and all(.[]; .conclusion == "success"))')" = true
-          git diff --exit-code a1004ce3e5d14eb9daf05adaadf3c191e939de9f HEAD -- lib test pubspec.yaml analysis_options.yaml config scripts firestore.rules
+          test "$(gh run view 38896951517 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = 7d7dd824bd2e3e7912dd096a10e74b92b605d841
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/38896951517/jobs?per_page=100" --jq '[.jobs[] | select(.name == "flutter" or .name == "rules" or .name == "install (30)" or .name == "install (35)" or .name == "install (36)" or .name == "install (37)")] | (length == 6 and all(.[]; .conclusion == "success"))')" = true
+          git diff --exit-code 7d7dd824bd2e3e7912dd096a10e74b92b605d841 HEAD -- lib test pubspec.yaml analysis_options.yaml config scripts firestore.rules
           mkdir apk
-          gh run download 38850777908 --repo "$GITHUB_REPOSITORY" --name raff-demo-apk --dir apk
-          echo '5f8082f3f0da213e93961d543c3b84ae4294888876e9f2854d08c48f65d5ec0c  apk/app-release.apk' | sha256sum --check
+          gh run download 38896951517 --repo "$GITHUB_REPOSITORY" --name raff-demo-apk --dir apk
+          echo '12eee22df56fc4d22e6f95d204436f699a717655bdc80359737cb9c95290d549  apk/app-release.apk' | sha256sum --check
       - name: Enable hardware acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -59,12 +62,15 @@ jobs:
             echo 'Newer commit exists; release publishing skipped.'
             exit 0
           fi
-          cp apk/app-release.apk apk/raff-0.3.2-universal.apk
-          cp docs/RELEASE_0.3.2.md apk/release-notes.md
+          cp apk/app-release.apk apk/raff-0.3.3-universal.apk
+          cp docs/RELEASE_0.3.3.md apk/release-notes.md
           printf '\nفحص أندرويد 7 والنشر: https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> apk/release-notes.md
-          if gh release view demo-36 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload demo-36 apk/raff-0.3.2-universal.apk --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit demo-36 --repo "$GITHUB_REPOSITORY" --notes-file apk/release-notes.md
+          if gh release view demo-47 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload demo-47 apk/raff-0.3.3-universal.apk --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit demo-47 --repo "$GITHUB_REPOSITORY" --notes-file apk/release-notes.md
           else
-            gh release create demo-36 apk/raff-0.3.2-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'رفّ 0.3.2 — استيراد ومساومة' --notes-file apk/release-notes.md
+            gh release create demo-47 apk/raff-0.3.3-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'رفّ 0.3.3 — إصلاح استيراد Excel' --notes-file apk/release-notes.md
           fi
+          cp apk/app-release.apk apk/raff.apk
+          gh release upload demo-universal apk/raff.apk --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit demo-universal --repo "$GITHUB_REPOSITORY" --title 'رفّ 0.3.3 — نسخة Android موحدة' --notes-file apk/release-notes.md
