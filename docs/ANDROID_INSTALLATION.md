@@ -23,6 +23,21 @@
 - Release signing still uses an ephemeral debug key. This is a separate confirmed
   update-distribution defect. Lost old private keys cannot be recovered from APKs.
 
+## Repository-side remediation
+
+The build now supports a persistent release keystore and verifies its expected
+certificate before permitting the main release job. Without provisioned secrets,
+CI artifacts remain internal and publication is skipped. The permanent key is
+not configured yet. See [ANDROID_SIGNING.md](ANDROID_SIGNING.md).
+
+The earlier packaging-compatibility change in commit
+`5011bfcf0a82df2715fab00ee45a6c833e8db2d8` remains in the current source:
+native libraries are compressed and extracted at install time. It was not lost
+between releases. The 0.4.0 build log confirms v2 signature verification, minimum
+SDK 24 and target SDK 36. These observations do not identify the phone's failure.
+The user has no further diagnostic information beyond the screenshot; continue
+available repository-side work without repeatedly requesting technical logs.
+
 ## Next diagnostic step
 
 A screenshot of this generic dialog cannot reveal the reason. With consent and

@@ -43,8 +43,34 @@ android {
     }
 }
 '''
+    # A release secret is optional for internal CI builds, never for distribution.
+    # Do not interpolate secret values into generated files.
+    if '// Raff persistent release signing' not in source:
+        source += '''
+// Raff persistent release signing
+val raffReleaseStore = System.getenv("RAFF_RELEASE_KEYSTORE")
+if (!raffReleaseStore.isNullOrBlank()) {
+    android {
+        signingConfigs {
+            create("raffRelease") {
+                storeFile = file(raffReleaseStore)
+                storePassword = requireNotNull(System.getenv("RAFF_ANDROID_STORE_PASSWORD"))
+                keyAlias = requireNotNull(System.getenv("RAFF_ANDROID_KEY_ALIAS"))
+                keyPassword = requireNotNull(System.getenv("RAFF_ANDROID_KEY_PASSWORD"))
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+        buildTypes.getByName("release") {
+            signingConfig = signingConfigs.getByName("raffRelease")
+        }
+    }
+}
+'''
     gradle.write_text(source)
 # Remove the generated counter-app test; this project supplies its own tests.
 test = Path('test/widget_test.dart')
 if test.exists() and 'MyApp' in test.read_text():
     test.unlink()
+

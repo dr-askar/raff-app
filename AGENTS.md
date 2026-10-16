@@ -14,9 +14,11 @@ by themselves, explain a clean-install rejection.
 Required working rules:
 - Keep this incident open until the affected physical phone installs and opens
   the exact candidate APK. Emulator success alone does not close it.
-- Obtain the actual PackageManager/installer failure code before attributing this
-  clean-install failure to a cause or rebuilding another purported fix.
-  Use the diagnostic script in the linked document when a device is available.
+- The user has only the screenshot and does not want technical log requests.
+  Continue repository/build/history investigation with available evidence.
+  Use native installer diagnostics when device access becomes available, but do
+  not make them a prerequisite for useful implementation work. Do not attribute
+  the clean-install failure to a cause that has not been established.
 - Never treat a filename containing "universal" or "verified" as evidence.
   Match exact bytes/hash, package/version, ABIs, SDK, signature, ZIP and native
   alignment. Record physical-device checks separately from emulator checks.
