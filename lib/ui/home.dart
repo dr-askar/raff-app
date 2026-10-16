@@ -40,6 +40,10 @@ class _HomeState extends State<Home> {
   Future<void> addToCart(Product p) async {
     if (!s.can('useCalculator')) { return; }
     if (!p.ready) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('المادة تحتاج تسعيراً أولاً'))); return; }
+    if (cart.any((line) => line.id == p.id && line.unit != p.unit)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تغيرت وحدة المادة. احذفها من السلة ثم أضفها مجدداً.')));
+      return;
+    }
     final quantity = p.byWeight ? await numberDialog('وزن ${p.name}', 'الوزن بالكيلوغرام', initial: 1, quantity: true, positive: true) : 1.0;
     if (quantity == null || !mounted || !s.can('useCalculator')) { return; }
     FocusManager.instance.primaryFocus?.unfocus();
@@ -269,6 +273,10 @@ class _HomeState extends State<Home> {
             if (await confirm(context, 'زبون جديد', 'مسح السلة الحالية وبدء حساب جديد؟') && mounted) { setState(cart.clear); }
           }, child: const Text('زبون جديد'))]),
         if (cart.isNotEmpty) TextButton(onPressed: () async {
+          if (cart.any((line) { final product = s.findId(line.id); return product != null && product.unit != line.unit; })) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تغيرت وحدة مادة. احذفها من السلة ثم أضفها مجدداً قبل تحديث الأسعار.')));
+            return;
+          }
           if (await confirm(context, 'تحديث أسعار السلة', 'سيتم استبدال أسعار السلة بأسعار المواد الحالية.') && mounted) {
             setState(() {
               for (var i = 0; i < cart.length; i++) {

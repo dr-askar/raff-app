@@ -102,6 +102,11 @@ void main() {
     await tester.enterText(field, '٠٫١٢٥'); await tester.tap(find.text('حفظ')); await tester.pumpAndSettle();
     expect(find.text('0.125 كغ'), findsOneWidget); expect(find.text('625 ل.س'), findsNWidgets(2));
     expect(tester.takeException(), isNull);
+    await store.saveProduct(store.findId('weight')!.edit(unit: 'piece', settings: store.settings));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('تحديث أسعار السلة')); await tester.pumpAndSettle();
+    expect(find.text('تغيرت وحدة مادة. احذفها من السلة ثم أضفها مجدداً قبل تحديث الأسعار.'), findsOneWidget);
+    expect(find.text('625 ل.س'), findsNWidgets(2)); expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink()); store.dispose();
   });
 }
