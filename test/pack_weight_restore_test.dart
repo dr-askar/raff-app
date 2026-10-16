@@ -104,6 +104,8 @@ void main() {
     expect(tester.takeException(), isNull);
     await store.saveProduct(store.findId('weight')!.edit(unit: 'piece', settings: store.settings));
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2)); await tester.pumpAndSettle();
+    expect(find.text('تحديث أسعار السلة').hitTestable(), findsOneWidget);
     await tester.tap(find.text('تحديث أسعار السلة')); await tester.pumpAndSettle();
     expect(find.text('تغيرت وحدة مادة. احذفها من السلة ثم أضفها مجدداً قبل تحديث الأسعار.'), findsOneWidget);
     expect(find.text('625 ل.س'), findsNWidgets(2)); expect(tester.takeException(), isNull);
