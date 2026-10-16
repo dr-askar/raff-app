@@ -22,6 +22,15 @@ void main() {
     zero.setSellingPrice(0, 2); expect(zero.discountPercent, 0);
     expect(() => zero.setSellingPrice(1, 2), throwsFormatException);
   });
+  test('fractional floors round upward and remain enterable at displayed precision', () {
+    const product = Product(id: 'p', name: 'fraction', manualPrice: 12.34, ready: true, bargainPercent: 2);
+    final line = CartLine(id: 'p', name: 'fraction', unitPrice: 12.34);
+    expect(product.minimumPrice(const StoreSettings()), 12.10);
+    expect(line.minimumPrice(2), 12.10);
+    expect(() => line.setSellingPrice(12.09, 2), throwsFormatException);
+    line.setSellingPrice(12.10, 2); expect(line.sellingPrice, 12.10);
+    line.setDiscount(2, 2); expect(line.sellingPrice, 12.10);
+  });
   test('lowering the owner limit or revoking permission removes an excessive chosen price', () async {
     SharedPreferences.setMockInitialValues({});
     final s = AppStore(prefs: await SharedPreferences.getInstance()); await s.initialize();
@@ -50,6 +59,7 @@ void main() {
     });
     s.lockWorker();
     await tester.pumpWidget(RaffApp(store: s)); await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, p.name); await tester.pumpAndSettle();
     expect(find.textContaining('أقل سعر مسموح: 4,900'), findsOneWidget);
     await tester.tap(find.text('حساب زبون')); await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, p.name); await tester.pumpAndSettle();
@@ -62,7 +72,7 @@ void main() {
     expect(find.text('اختر سعراً بين أقل سعر مسموح وسعر المبيع.'), findsOneWidget);
     await tester.enterText(field, '٤٩٥٠'); await tester.tap(find.text('اعتماد السعر')); await tester.pumpAndSettle();
     expect(find.textContaining('4,950 للقطعة'), findsOneWidget);
-    expect(find.text('4,950 ل.س'), findsOneWidget); expect(tester.takeException(), isNull);
+    expect(find.text('4,950 ل.س'), findsNWidgets(2)); expect(tester.takeException(), isNull);
     expect(s.findId(p.id)!.price(s.settings), 5000);
     await tester.pumpWidget(const SizedBox.shrink()); s.dispose();
   });

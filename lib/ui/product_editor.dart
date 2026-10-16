@@ -132,7 +132,7 @@ class _ProductEditorState extends State<ProductEditor> {
           const Text('المساومة تخفيض للزبون في السلة فقط، ولا تغيّر سعر الصنف المحفوظ.'),
           Card(color: const Color(0xffe3eef9), child: Padding(padding: const EdgeInsets.all(20), child: Column(children: [
             const Text('سعر المبيع للقطعة'), Text('${money(sale)} ${s.settings.currency}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-            Text('أقل سعر مسموح: ${money(sale * (1 - (s.can('applyBargain') ? (double.tryParse(bargain.text) ?? 0).clamp(0, 100) : 0) / 100))} ${s.settings.currency}'),
+            Text('أقل سعر مسموح: ${money(minimumSalePrice(sale, s.can('applyBargain') ? (double.tryParse(bargain.text) ?? 0).clamp(0, 100).toDouble() : 0))} ${s.settings.currency}'),
           ]))), const SizedBox(height: 20),
         ])))));
   });

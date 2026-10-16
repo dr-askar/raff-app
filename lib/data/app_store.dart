@@ -384,8 +384,8 @@ class AppStore extends ChangeNotifier {
   double basketTotal(List<CartLine> lines) => lines.fold<double>(0, (amount, line) {
     final product = findId(line.id);
     final allowed = can('applyBargain') && can('useCalculator') && product != null && product.ready ? product.bargainPercent : 0.0;
-    if (!line.discountPercent.isFinite || line.discountPercent < 0) { line.discountPercent = 0; }
-    if (line.discountPercent > allowed) { line.discountPercent = allowed; }
+    if (!line.discountPercent.isFinite || line.discountPercent < 0) { line.setDiscount(0, 0); }
+    if (line.discountPercent > allowed) { line.setDiscount(allowed, allowed); }
     return amount + line.total;
   });
 

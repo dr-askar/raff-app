@@ -1,5 +1,15 @@
 typedef Json = Map<String, dynamic>;
 
+// Round the floor upward to the displayed currency precision so a displayed
+// minimum can be entered without exceeding the owner's discount allowance.
+double minimumSalePrice(double price, double percent) {
+  if (percent == 0) { return price; }
+  final cents = price * (1 - percent / 100) * 100;
+  final nearest = cents.roundToDouble();
+  final rounded = ((cents - nearest).abs() < 0.0000001 ? nearest : cents.ceilToDouble()) / 100;
+  return rounded > price ? price : rounded;
+}
+
 double number(dynamic value, [double fallback = 0]) {
   final parsed = value is num ? value.toDouble() : double.tryParse('$value');
   return parsed != null && parsed.isFinite ? parsed : fallback;
@@ -52,7 +62,7 @@ class Product {
   Json marginJson() => {'margin': margin};
   Json pricingJson() => {'costUsd': costUsd, 'costLocal': costLocal, 'margin': margin};
   double price(StoreSettings settings) => manualPrice ?? (costCurrency == 'SYP' ? saleBaseLocal ?? 0 : saleBaseUsd * settings.rate);
-  double minimumPrice(StoreSettings settings) => price(settings) * (1 - bargainPercent / 100);
+  double minimumPrice(StoreSettings settings) => minimumSalePrice(price(settings), bargainPercent);
   bool get hasCost => costCurrency == 'SYP' ? costLocal != null : costUsd != null;
   double? localCost(double rate) => costCurrency == 'SYP' ? costLocal : (costUsd == null ? null : costUsd! * rate);
   double effectiveMargin(StoreSettings settings) => margin ?? settings.margin;
@@ -123,11 +133,13 @@ class CartLine {
   set discountPercent(double value) { _discountPercent = value; _chosenPrice = null; }
   CartLine({required this.id, required this.name, required this.unitPrice, this.quantity = 1});
   double get sellingPrice => _chosenPrice ?? unitPrice * (1 - discountPercent / 100);
-  double minimumPrice(double allowedMaximum) => unitPrice * (1 - allowedMaximum / 100);
+  double minimumPrice(double allowedMaximum) => minimumSalePrice(unitPrice, allowedMaximum);
   double get total => sellingPrice * quantity;
   void setDiscount(double percent, double allowedMaximum) {
-    if (!percent.isFinite || percent < 0 || percent > allowedMaximum || percent > 100) { throw const FormatException('نسبة المساومة تتجاوز الحد المسموح لهذه المادة.'); }
+    if (!allowedMaximum.isFinite || allowedMaximum < 0 || allowedMaximum > 100 ||
+        !percent.isFinite || percent < 0 || percent > allowedMaximum || percent > 100) { throw const FormatException('نسبة المساومة تتجاوز الحد المسموح لهذه المادة.'); }
     discountPercent = percent;
+    _chosenPrice = minimumPrice(percent);
   }
   void setSellingPrice(double price, double allowedMaximum) {
     if (!allowedMaximum.isFinite || allowedMaximum < 0 || allowedMaximum > 100 ||
