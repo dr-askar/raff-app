@@ -449,6 +449,7 @@ class _HomeState extends State<Home> {
     'ستفتح نافذة ملفات أندرويد. افتح قائمة المواقع واختر Google Drive، ثم ${saving ? 'المجلد واضغط حفظ' : 'الملف المطلوب'}. يجب أن يكون تطبيق Drive مثبتاً وحسابك مفتوحاً. يمكنك اختيار تخزين الهاتف أيضاً.');
   Future<void> saveDrive({required bool backup}) async {
     if (!s.owner || busy || !await driveGuide(saving: true) || !mounted) { return; }
+    if (!s.owner) { return; }
     setState(() => busy = true);
     try {
       final bytes = backup ? utf8.encode(const JsonEncoder.withIndent('  ').convert(s.backup())) : StoreFiles.productExcel(s.products, s.settings);
@@ -456,7 +457,7 @@ class _HomeState extends State<Home> {
       final saved = await DeviceFiles.save(bytes, name);
       if (saved && mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الملف في المكان الذي اخترته'))); }
     } catch (e) {
-      if (mounted) { await perform(context, () async { throw e; }); }
+      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e is FormatException ? e.message : 'تعذر حفظ الملف. تحقق من مكان الحفظ وDrive وحاول مجدداً.'))); }
     } finally { if (mounted) { setState(() => busy = false); } }
   }
 }

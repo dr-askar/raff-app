@@ -7,7 +7,7 @@ class WorkerAccess {
     'editExchangeRate': 'تغيير سعر صرف الدولار',
     'addProduct': 'إضافة صنف جديد',
     'deleteProduct': 'حذف صنف',
-    'editDetails': 'تعديل الاسم والباركود والتعبئة والتصنيف',
+    'editDetails': 'تعديل الاسم والباركود والتعبئة والوحدة والتصنيف',
     'editQuantity': 'تعديل الكمية المتوفرة',
     'editSalePrice': 'تعديل سعر البيع يدوياً',
     'editCost': 'تعديل رأس المال وعملته',
