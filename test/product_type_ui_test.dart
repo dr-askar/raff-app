@@ -93,8 +93,10 @@ void main() {
 
   testWidgets('restore actions follow the worker permission without exposing exports or cost', (tester) async {
     final store = AppStore(prefs: await SharedPreferences.getInstance()); await store.initialize();
-    await store.setOwnerPassword('owner123');
-    await store.setWorkerAccess('local', const WorkerAccess().withValue('restoreBackup', true));
+    await tester.runAsync(() async {
+      await store.setOwnerPassword('owner123');
+      await store.setWorkerAccess('local', const WorkerAccess().withValue('restoreBackup', true));
+    });
     store.lockWorker();
     await tester.pumpWidget(RaffApp(store: store)); await tester.pumpAndSettle();
     await tester.tap(find.text('الإعدادات')); await tester.pumpAndSettle();
@@ -103,8 +105,11 @@ void main() {
     expect(find.text('تنزيل نسخة احتياطية'), findsNothing);
     expect(find.text('تصدير المواد إلى Excel'), findsNothing);
     expect(store.can('viewCost'), false); expect(store.owner, false);
-    await store.unlockOwner('owner123');
-    await store.setWorkerAccess('local', const WorkerAccess()); store.lockWorker();
+    await tester.runAsync(() async {
+      await store.unlockOwner('owner123');
+      await store.setWorkerAccess('local', const WorkerAccess());
+    });
+    store.lockWorker();
     await tester.pumpAndSettle();
     expect(find.text('استعادة نسخة احتياطية'), findsNothing);
     expect(find.text('استعادة نسخة JSON من Drive'), findsNothing);
