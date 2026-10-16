@@ -34,4 +34,39 @@ void main() {
     store.dispose();
     reopened.dispose();
   });
+  test('1200 products import and reopen from one worksheet without a row cap', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = AppStore(prefs: prefs);
+    await store.initialize();
+    final book = Excel.createExcel();
+    final sheet = book['Products'];
+    book.delete('Sheet1');
+    sheet.appendRow(['name', 'barcode', 'quantity'].map(TextCellValue.new).toList());
+    for (var i = 0; i < 1200; i++) {
+      sheet.appendRow([TextCellValue('صنف اختبار $i'),
+        TextCellValue('000$i'), IntCellValue(i)]);
+    }
+    final plan = StoreFiles.preview(book.encode()!, store.products, store.settings, store.newId);
+    expect(plan.sheets, 1);
+    expect(plan.added, 1200);
+    expect(plan.warnings, isEmpty);
+    final progress = <int>[];
+    final result = await store.importProducts(plan.products,
+      settingsRevision: store.settings.revision,
+      onProgress: (done, total) { expect(total, 1200); progress.add(done); });
+    expect(result.saved, 1200);
+    expect(result.failed, 0);
+    expect(result.unprocessed, 0);
+    expect(progress.last, 1200);
+    final reopened = AppStore(prefs: prefs);
+    await reopened.initialize();
+    expect(reopened.products.length, 1203);
+    for (var i = 0; i < 1200; i++) {
+      expect(reopened.findBarcode('000$i')?.quantity, i.toDouble());
+    }
+    store.dispose();
+    reopened.dispose();
+  });
+
 }

@@ -17,11 +17,6 @@ jobs:
           channel: stable
           flutter-version: '3.47.7'
           cache: true
-      - name: Keep the demo signing key for subsequent updates
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: raff-demo-signing-v1
       - run: bash scripts/bootstrap.sh
       - run: dart format lib test
       - run: flutter analyze
@@ -145,5 +140,5 @@ jobs:
           RAFF_ASSET="apk/raff-$RAFF_VERSION-universal.apk"
           cp apk/app-release.apk "$RAFF_ASSET"
           RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
-          gh release create "$RAFF_TAG" "$RAFF_ASSET" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ $RAFF_VERSION — استيراد ومساومة" --notes "استيراد جميع صفوف أوراق الأصناف مع عداد تقدم وتقرير، واختيار سعر الزبون بين سعر المبيع والحد الأدنى. ملف موحد ARM32 وARM64 وx86_64. Android 7 أو أحدث. تم فحص التوقيع وتثبيت التطبيق وفتحه على محاكيات Android 7 و11 و15 و16 و17 بوضع 16KB. هذا لا يضمن كل أجهزة الشركات؛ الكاميرا تحتاج تجربة على هاتف حقيقي. نسخة محلية دون مزامنة Firebase مفعّلة. احفظ نسخة بيانات قبل تحديث إصدار قديم."
+          gh release create "$RAFF_TAG" "$RAFF_ASSET" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ $RAFF_VERSION — إصلاح استيراد Excel" --notes "إصلاح قراءة ملفات Excel التي تحتوي فهرس نصوص مكررة بعد تعديلها. نجح اختبار 113 صنفاً مع تكرار النصوص واختبار 1200 صنف من ورقة واحدة مع إعادة فتح التخزين. لا يوجد حد ثابت لعدد الأصناف؛ تبقى حدود حجم الملف وذاكرة الهاتف. ملف موحد ARM32 وARM64 وx86_64، Android 7 أو أحدث. فُحص التوقيع والتثبيت والفتح على محاكيات Android 7 و11 و15 و16 و17 بصفحات 16KB. لا تشمل التجربة كل الهواتف أو الكاميرا الفعلية. نسخة محلية دون مزامنة Firebase مفعّلة. التوقيع تجريبي وقد يختلف عن الإصدارات السابقة: إذا لديك بيانات فاحفظ نسخة JSON خارج التطبيق وتأكد منها قبل أي إزالة. لا يلزم حذف ملف Excel أو تقسيمه إلى أوراق صغيرة. كلمة سر المدير وصلاحيات العامل لا تُنقل مع نسخة المواد."
 
