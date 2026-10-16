@@ -24,6 +24,7 @@ void main() {
     s.lockWorker();
     await tester.pumpWidget(MaterialApp(home: ProductEditor(store: s, product: s.products.first)));
     await tester.pumpAndSettle(); expect(find.text('عملة رأس المال'), findsNothing);
+    await tester.scrollUntilVisible(find.text('استخدام نسبة الربح العامة'), 250, scrollable: find.byType(Scrollable).first);
     expect(find.text('استخدام نسبة الربح العامة'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() async { await s.unlockOwner('owner123'); await s.setWorkerAccess('local', const WorkerAccess().withValue('viewCost', true)); }); s.lockWorker();
@@ -61,8 +62,10 @@ void main() {
     expect(find.text('عملة رأس المال'), findsNothing);
     expect(find.text('استخدام نسبة الربح العامة'), findsNothing);
     expect(find.text('سعر بيع ثابت يدوياً'), findsNothing);
-    final fields = tester.widgetList<TextFormField>(find.byType(TextFormField)).toList();
-    expect(fields.first.enabled, false); expect(fields.last.enabled, true);
+    expect(tester.widget<TextFormField>(find.widgetWithText(TextFormField, 'اسم المادة')).enabled, false);
+    final quantity = find.widgetWithText(TextFormField, 'عدد القطع المتوفرة');
+    await tester.scrollUntilVisible(quantity, 250, scrollable: find.byType(Scrollable).first);
+    expect(tester.widget<TextFormField>(quantity).enabled, true);
     await tester.pumpWidget(const SizedBox.shrink()); s.dispose();
   });
   testWidgets('calculator stays usable on a phone while searching with the keyboard open', (tester) async {
@@ -96,3 +99,4 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink()); s.dispose();
   });
 }
+
