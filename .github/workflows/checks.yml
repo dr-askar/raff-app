@@ -71,6 +71,9 @@ jobs:
       matrix:
         api: [24, 30, 35, 36, 37]
         include:
+          - api: 24
+            ram: 1536M
+            disk: 2048M
           - api: 37
             platform: 36
             image: '37.0'
@@ -85,6 +88,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Use SDK tools that understand Android 17.0 image metadata
+        if: matrix.api != 24
         run: |
           set +o pipefail
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "cmdline-tools;22.0"
@@ -103,8 +107,8 @@ jobs:
           system-image-api-level: ${{ matrix.image || matrix.api }}
           target: ${{ matrix.target || 'google_apis' }}
           arch: x86_64
-          ram-size: 4096M
-          disk-size: 8192M
+          ram-size: ${{ matrix.ram || '4096M' }}
+          disk-size: ${{ matrix.disk || '8192M' }}
           disable-animations: true
           emulator-options: -no-window -gpu ${{ matrix.api == 37 && 'software' || 'swiftshader_indirect' }} -noaudio -no-boot-anim -camera-back none
           script: |
