@@ -72,7 +72,7 @@ class _AccessSettingsState extends State<AccessSettings> {
     bottomNavigationBar: members == null || members!.isEmpty ? null : SafeArea(child: Padding(padding: const EdgeInsets.all(12), child: FilledButton.icon(onPressed: busy ? null : save, icon: const Icon(Icons.lock_outline), label: Text(busy ? 'جارٍ الحفظ…' : 'حفظ الصلاحيات')))),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 650), child:
       error != null ? Center(child: Text(error!)) : members == null ? const Center(child: CircularProgressIndicator()) : ListView(padding: const EdgeInsets.all(20), children: [
-        const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('فعّل فقط ما يحتاجه العامل. رؤية رأس المال ورؤية نسبة الربح خياران مستقلان. تعديل كل منهما يحتاج السماح برؤيته فقط. نسبة المساومة لكل مادة يحددها المدير وحده. المدير وحده يغيّر هذه الصلاحيات. السماح بالاسترجاع يتيح استبدال المواد والأسعار والإعدادات بالنسخة، ولا يغيّر كلمة السر أو صلاحيات العامل ولا يمنحه تصدير النسخ.'))),
+        const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('فعّل فقط ما يحتاجه العامل. رؤية رأس المال ورؤية نسبة الربح خياران مستقلان. تعديل كل منهما يحتاج السماح برؤيته فقط. نسبة المساومة لكل مادة يحددها المدير وحده. المدير وحده يغيّر هذه الصلاحيات. السماح بالاسترجاع يتيح استبدال المواد والأسعار والإعدادات بالنسخة، ولا يغيّر كلمة السر أو صلاحيات العامل ولا يمنحه تصدير النسخ. انتبه: ملف JSON نفسه يحتوي بيانات التكلفة؛ اسمح بالاسترجاع لمن تسمح له باستلام هذا الملف.'))),
         if (members!.isEmpty) const Text('لا يوجد حساب عامل مضاف للمحل. أضفه في Firebase أولاً.'),
         if (members!.isNotEmpty) ...[
           DropdownButtonFormField<String>(initialValue: selected, decoration: const InputDecoration(labelText: 'العامل'),

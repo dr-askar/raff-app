@@ -113,7 +113,7 @@ class _ProductEditorState extends State<ProductEditor> {
           field(name, 'اسم المادة', enabled: details), field(category, 'التصنيف', optional: true, enabled: details),
           Row(children: [Expanded(child: field(barcode, 'الباركود', optional: true, enabled: details)), const SizedBox(width: 8),
             if (details) IconButton.filledTonal(tooltip: 'قراءة الباركود', onPressed: busy ? null : () async { final code = await scanBarcode(context); if (code != null && mounted) { setState(() => barcode.text = code); } }, icon: const Icon(Icons.qr_code_scanner))]),
-          DropdownButtonFormField<String>(initialValue: unit,
+          DropdownButtonFormField<String>(isExpanded: true, initialValue: unit,
             decoration: const InputDecoration(labelText: 'وحدة البيع'),
             items: const [DropdownMenuItem(value: 'piece', child: Text('قطعة')),
               DropdownMenuItem(value: 'kg', child: Text('كيلوغرام — يقبل الكسور'))],
@@ -123,7 +123,7 @@ class _ProductEditorState extends State<ProductEditor> {
           if (s.can('editQuantity')) SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('إدخال المخزون بعدد الطرود'), value: cartonQuantity, onChanged: busy ? null : (v) => setState(() => cartonQuantity = v)),
           field(quantity, cartonQuantity ? 'عدد الطرود المتوفرة' : byWeight ? 'الكمية المتوفرة بالكيلوغرام' : 'عدد القطع المتوفرة', numeric: true, quantityField: true, enabled: s.can('editQuantity')),
           if (s.can('viewCost')) ...[
-            DropdownButtonFormField<String>(initialValue: currency, decoration: const InputDecoration(labelText: 'عملة رأس المال'),
+            DropdownButtonFormField<String>(isExpanded: true, initialValue: currency, decoration: const InputDecoration(labelText: 'عملة رأس المال'),
               items: const [DropdownMenuItem(value: 'USD', child: Text('دولار USD')), DropdownMenuItem(value: 'SYP', child: Text('ليرة سورية SYP'))],
               onChanged: busy || !s.can('editCost') ? null : (v) => setState(() { currency = v!; cost.clear(); })),
             if (s.can('editCost')) SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('إدخال سعر تكلفة الطرد'), value: cartonCost, onChanged: busy ? null : (v) => setState(() {
