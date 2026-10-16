@@ -1,0 +1,17 @@
+name: Excel values regression
+on:
+  push:
+    branches: [fix/excel-mobile-values]
+  workflow_dispatch:
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter test test/mobile_values_test.dart --reporter expanded
