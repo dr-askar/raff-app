@@ -36,6 +36,15 @@ void main() {
     expect(plan.warnings, isEmpty); expect(plan.products.first.costUsd, 2);
     expect(plan.products.last.costLocal, 2000);
   });
+  test('editing unit cost in an exported workbook imports without stale pack-cost conflicts', () {
+    final product = const Product(id: 'price', name: 'طرد', pack: 12)
+      .edit(costUsd: 2, settings: const StoreSettings());
+    final book = Excel.decodeBytes(StoreFiles.productExcel([product], const StoreSettings()));
+    book['Products'].cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: 1)).value = DoubleCellValue(3);
+    final plan = StoreFiles.preview(book.encode()!, [product], const StoreSettings(), () => 'new');
+    expect(plan.warnings, isEmpty); expect(plan.updated, 1);
+    expect(plan.products.single.costUsd, 3); expect(plan.products.single.packCost, 36);
+  });
   test('fractional sale uses exact weight and bargaining applies per kilogram', () {
     final line = CartLine(id: 'kg', name: 'جبنة', unitPrice: 5000, unit: 'kg');
     line.setQuantity(0.125); expect(line.total, 625);

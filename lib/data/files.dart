@@ -28,12 +28,12 @@ class StoreFiles {
     final sheet = book['Products'];
     book.delete('Sheet1');
     sheet.appendRow(['id', 'name', 'barcode', 'category', 'pack', 'quantity', 'cost_usd',
-      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent', 'unit', 'cost_per_pack'].map(TextCellValue.new).toList());
+      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent', 'unit'].map(TextCellValue.new).toList());
     for (final p in products) {
       sheet.appendRow([TextCellValue(p.id), TextCellValue(p.name), TextCellValue(p.barcode), TextCellValue(p.category),
         p.pack == p.pack.roundToDouble() ? IntCellValue(p.pack.toInt()) : DoubleCellValue(p.pack), DoubleCellValue(p.quantity), p.costUsd == null ? null : DoubleCellValue(p.costUsd!),
         p.margin == null ? null : DoubleCellValue(p.margin!), p.manualPrice == null ? null : DoubleCellValue(p.manualPrice!),
-        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent), TextCellValue(p.unit), p.packCost == null ? null : DoubleCellValue(p.packCost!)]);
+        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent), TextCellValue(p.unit)]);
     }
     return book.encode()!;
   }
