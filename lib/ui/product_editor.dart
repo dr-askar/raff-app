@@ -32,7 +32,8 @@ class _ProductEditorState extends State<ProductEditor> {
     barcode = TextEditingController(text: p?.barcode ?? widget.barcode ?? ''); pack = TextEditingController(text: '${p?.pack ?? 1}');
     unit = p?.unit ?? 'piece';
     quantity = TextEditingController(text: quantityText(p?.quantity ?? 0)); currency = p?.costCurrency ?? 'USD';
-    cost = TextEditingController(text: p?.packCost?.toString() ?? '');
+    cartonCost = s.can('editCost');
+    cost = TextEditingController(text: s.can('viewCost') ? (cartonCost ? p?.packCost : p?.unitCost)?.toString() ?? '' : '');
     margin = TextEditingController(text: '${p?.margin ?? s.settings.margin}');
     manual = TextEditingController(text: p?.manualPrice?.toString() ?? '');
     bargain = TextEditingController(text: '${p?.bargainPercent ?? 0}');

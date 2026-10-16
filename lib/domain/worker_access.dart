@@ -2,7 +2,7 @@ import 'models.dart';
 
 class WorkerAccess {
   static const labels = <String, String>{
-    'viewCost': 'رؤية رأس مال القطعة',
+    'viewCost': 'رؤية رأس مال الوحدة (قطعة أو كغ)',
     'viewMargin': 'رؤية نسبة الربح',
     'editExchangeRate': 'تغيير سعر صرف الدولار',
     'addProduct': 'إضافة صنف جديد',
