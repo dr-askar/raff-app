@@ -23,4 +23,7 @@ firebase-debug.log
 __pycache__/
 *.pyc
 android-install-report*.json
+tools/install-helper/assets/
+helper-apk/
+helper-test-result.txt
 
