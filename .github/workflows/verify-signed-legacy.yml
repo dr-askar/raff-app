@@ -1,0 +1,116 @@
+name: Verify signed Android 7 upgrade and publish
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-signed-legacy.yml']
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  legacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require the original signed bytes and four modern upgrade successes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh run view 38958874904 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = a6722e6087f52dca2dfea869a6e2fde93f754913
+          gh api 'repos/dr-askar/raff-app/actions/runs/38958874904/jobs?filter=latest&per_page=100' > "$RUNNER_TEMP/prior-jobs.json"
+          python3 -c 'import json,os; j={v["name"]:v for v in json.load(open(os.environ["RUNNER_TEMP"]+"/prior-jobs.json"))["jobs"]}; required=["sign","install (30)","install (35)","install (36)","install (37)"]; assert all(j[n]["conclusion"]=="success" for n in required); assert all(v["name"]=="install (24)" for v in j.values() if v["conclusion"]=="failure")'
+          git diff --exit-code a6722e6087f52dca2dfea869a6e2fde93f754913 HEAD -- lib test pubspec.yaml analysis_options.yaml config scripts firestore.rules
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-signed-candidate
+          run-id: 38958874904
+          github-token: ${{ github.token }}
+          path: apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-signed-upgrade-test-base
+          run-id: 38958874904
+          github-token: ${{ github.token }}
+          path: apk
+      - run: echo '5857b79d51300d3de282dd4454d0fab6a74e1c9c21bdb7d0fd2f703d817f6926  apk/raff-0.4.1.apk' | sha256sum --check
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify actual signed certificate on both test APKs
+        run: |
+          set -euo pipefail
+          RAFF_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$RAFF_TOOLS/apksigner" verify --verbose --print-certs apk/raff-0.4.1.apk > "$RUNNER_TEMP/cert.txt"
+          RAFF_ANDROID_CERT_SHA256=$(cat config/android-release-cert.sha256) python3 scripts/release_signing.py verify "$RUNNER_TEMP/cert.txt"
+          "$RAFF_TOOLS/apksigner" verify --verbose --print-certs apk/baseline-test-0.4.0.apk > "$RUNNER_TEMP/base-cert.txt"
+          RAFF_ANDROID_CERT_SHA256=$(cat config/android-release-cert.sha256) python3 scripts/release_signing.py verify "$RUNNER_TEMP/base-cert.txt"
+      - name: Enable hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 24
+          target: google_apis
+          arch: x86_64
+          ram-size: 1536M
+          disk-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb shell getprop ro.build.version.release
+            adb install --no-streaming apk/raff-0.4.1.apk
+            adb logcat -c
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb shell pidof com.raffapp.raff
+            adb logcat -b crash -d
+            adb uninstall com.raffapp.raff
+            adb install --no-streaming apk/baseline-test-0.4.0.apk
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb shell am force-stop com.raffapp.raff
+            adb root
+            adb wait-for-device
+            adb pull /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml before-prefs.xml
+            test -s before-prefs.xml
+            adb install --no-streaming -r apk/raff-0.4.1.apk
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb shell pidof com.raffapp.raff
+            adb shell am force-stop com.raffapp.raff
+            adb pull /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml after-prefs.xml
+            cmp before-prefs.xml after-prefs.xml
+            sha256sum before-prefs.xml after-prefs.xml
+            echo "Android 7 same-key upgrade retained actual app preferences."
+  publish:
+    needs: legacy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-signed-candidate
+          run-id: 38958874904
+          github-token: ${{ github.token }}
+          path: apk
+      - name: Publish the exact five-platform verified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RAFF_HEAD=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          test "$RAFF_HEAD" = "$GITHUB_SHA"
+          echo '5857b79d51300d3de282dd4454d0fab6a74e1c9c21bdb7d0fd2f703d817f6926  apk/raff-0.4.1.apk' | sha256sum --check
+          sed 's#  apk/#  #' apk/SHA256SUMS.txt > SHA256SUMS.txt
+          gh release create v0.4.1 apk/raff-0.4.1.apk SHA256SUMS.txt apk/certificate-sha256.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ 0.4.1 — توقيع ثابت والطرود والوزن" --notes-file docs/RELEASE_0.4.1.md

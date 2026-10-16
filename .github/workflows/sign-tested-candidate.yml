@@ -9,7 +9,7 @@ permissions:
   actions: read
 jobs:
   sign:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[verify-only]'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -149,15 +149,15 @@ jobs:
             adb shell am force-stop com.raffapp.raff
             adb root
             adb wait-for-device
-            adb shell sha256sum /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml | tr -d '\r' > before-prefs.txt
-            test -s before-prefs.txt
+            adb pull /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml before-prefs.xml
+            test -s before-prefs.xml
             adb install --no-streaming -r apk/raff-0.4.1.apk
             adb shell am start -W -n com.raffapp.raff/.MainActivity
             sleep 5
             adb shell pidof com.raffapp.raff
             adb shell am force-stop com.raffapp.raff
-            adb shell sha256sum /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml | tr -d '\r' > after-prefs.txt
-            cmp before-prefs.txt after-prefs.txt
+            adb pull /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml after-prefs.xml
+            cmp before-prefs.xml after-prefs.xml
             echo "Stable-key upgrade retained actual app preferences."
   publish:
     needs: [sign, install]
