@@ -79,7 +79,8 @@ class _AccessSettingsState extends State<AccessSettings> {
             items: members!.map((m) => DropdownMenuItem<String>(value: m['id'], child: Text(m['name'] ?? m['id']))).toList(),
             onChanged: busy ? null : (id) => setState(() => choose(members!.firstWhere((m) => m['id'] == id)))),
           const SizedBox(height: 14),
-          ...WorkerAccess.labels.entries.map((e) => Card(child: SwitchListTile(title: Text(e.value), value: access.allows(e.key),
+          ...WorkerAccess.labels.entries.map((e) => Card(child: SwitchListTile(key: ValueKey('permission-${e.key}'), title: Text(e.value), value: access.allows(e.key),
+            subtitle: e.key == 'restoreBackup' ? const Text('استبدال المواد والأسعار والإعدادات، دون تغيير كلمة السر أو الصلاحيات.') : null,
             onChanged: busy ? null : (value) => setState(() => access = access.withValue(e.key, value))))),
         ],
       ]))));

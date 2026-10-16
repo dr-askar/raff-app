@@ -1,5 +1,16 @@
 typedef Json = Map<String, dynamic>;
 
+// Keep stored units compatible while accepting the shop's Excel terminology.
+String productUnit(Object? value) {
+  final text = value?.toString().trim().toLowerCase() ?? '';
+  return const {
+    '': 'piece', 'طرد': 'piece', 'بالطرد': 'piece', 'قطعة': 'piece',
+    'عدد': 'piece', 'pack': 'piece', 'carton': 'piece', 'piece': 'piece',
+    'وزن': 'kg', 'بالوزن': 'kg', 'كغ': 'kg', 'كجم': 'kg', 'كيلو': 'kg',
+    'كيلوغرام': 'kg', 'weight': 'kg', 'kg': 'kg',
+  }[text] ?? text;
+}
+
 // Round the floor upward to the displayed currency precision so a displayed
 // minimum can be entered without exceeding the owner's discount allowance.
 double minimumSalePrice(double price, double percent) {
@@ -46,7 +57,7 @@ class Product {
   factory Product.fromJson(String id, Json j, [Json? pricing]) => Product(
     id: id, name: j['name'] as String? ?? '',
     category: j['category'] as String? ?? 'عام', barcode: j['barcode'] as String? ?? '',
-    pack: number(j['pack'], 1), unit: j['unit'] as String? ?? 'piece',
+    pack: number(j['pack'], 1), unit: productUnit(j['unit']),
     quantity: number(j['quantity']), bargainPercent: number(j['bargainPercent']), saleBaseUsd: number(j['saleBaseUsd']),
     saleBaseLocal: j['saleBaseLocal'] == null ? null : number(j['saleBaseLocal']),
     costCurrency: j['costCurrency'] as String? ?? 'USD',

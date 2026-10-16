@@ -122,12 +122,11 @@ class _HomeState extends State<Home> {
     ]),
   ));
 
-  Widget exchangeCard() => Container(margin: const EdgeInsets.fromLTRB(16, 16, 16, 12), padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xff234f7b), Color(0xff3479b2)]), borderRadius: BorderRadius.circular(22)),
+  Widget exchangeCard() => Container(key: const ValueKey('exchange-summary'), margin: const EdgeInsets.fromLTRB(16, 8, 16, 4), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xff234f7b), Color(0xff3479b2)]), borderRadius: BorderRadius.circular(14)),
     child: Row(children: [Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('سعر صرف الدولار', style: TextStyle(color: Colors.white70)), const SizedBox(height: 6),
-      Text('${money(s.settings.rate)} ${s.settings.currency}', style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
-      Text('${s.products.length} مادة${s.can('viewMargin') ? ' • ربح عام ${money(s.settings.margin)}%' : ''}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+      Text('سعر صرف الدولار • ${s.products.length} مادة${s.can('viewMargin') ? ' • ربح عام ${money(s.settings.margin)}%' : ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+      Text('${money(s.settings.rate)} ${s.settings.currency}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
     ])), if (s.can('editExchangeRate')) IconButton.filledTonal(tooltip: 'تعديل الصرف', onPressed: busy ? null : () async {
       final n = await numberDialog('سعر صرف الدولار', 'السعر الجديد', initial: s.settings.rate);
       if (n != null && mounted && await confirm(context, 'تحديث الأسعار التلقائية', 'تتغير الأسعار التلقائية وفق الصرف ${money(n)}. الأسعار الثابتة تبقى كما هي.')) {
@@ -355,12 +354,12 @@ class _HomeState extends State<Home> {
       const SizedBox(height: 12), const Text('الملفات والنسخ الاحتياطي', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
       Card(child: Column(children: [
         ListTile(leading: const Icon(Icons.download_outlined), title: const Text('تصدير المواد إلى Excel'), onTap: busy ? null : () => action(() => StoreFiles.shareBytes(StoreFiles.productExcel(s.products, s.settings), 'raff-products.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'ملف المواد جاهز للمشاركة')),
-        ListTile(leading: const Icon(Icons.upload_file_outlined), title: const Text('استيراد Excel'), subtitle: const Text('معاينة قبل الحفظ • الحقول الفارغة لا تمسح القيم'), onTap: busy ? null : importExcel),
+        ListTile(leading: const Icon(Icons.upload_file_outlined), title: const Text('استيراد Excel'), subtitle: const Text('معاينة قبل الحفظ • نوع الصنف الفارغ = طرد'), onTap: busy ? null : importExcel),
         ListTile(leading: const Icon(Icons.backup_outlined), title: const Text('تنزيل نسخة احتياطية'), subtitle: const Text('مواد وإعدادات وآخر سجل أسعار والجرد الحالي'), onTap: busy ? null : () => action(() => StoreFiles.shareJson(s.backup()), 'النسخة جاهزة. احفظها في مكان آمن')),
       ])),
     ],
     if (s.can('restoreBackup')) Card(child: ListTile(leading: const Icon(Icons.restore),
-      title: const Text('استرجاع نسخة احتياطية'), subtitle: const Text('استرجاع المواد والأسعار والإعدادات • القفل والصلاحيات لا تتغير'),
+      title: const Text('استعادة نسخة احتياطية'), subtitle: const Text('استرجاع المواد والأسعار والإعدادات • القفل والصلاحيات لا تتغير'),
       onTap: busy ? null : () => restore())),
     if (s.owner || s.can('restoreBackup')) ...[
       const SizedBox(height: 12), const Text('Google Drive', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -373,7 +372,7 @@ class _HomeState extends State<Home> {
           ListTile(leading: const Icon(Icons.backup_outlined), title: const Text('حفظ نسخة JSON على Drive'),
             onTap: busy ? null : () => saveDrive(backup: true)),
         ],
-        if (s.can('restoreBackup')) ListTile(leading: const Icon(Icons.restore_page_outlined), title: const Text('استرجاع نسخة JSON من Drive'),
+        if (s.can('restoreBackup')) ListTile(leading: const Icon(Icons.restore_page_outlined), title: const Text('استعادة نسخة JSON من Drive'),
           onTap: busy ? null : () => restore(fromDrive: true)),
       ])),
     ],
@@ -386,7 +385,7 @@ class _HomeState extends State<Home> {
         trailing: Text('${money(h.before)}\n↓ ${money(h.after)}')))),
     ],
     if (!s.owner) const Padding(padding: EdgeInsets.all(24), child: Text('الميزات المتاحة تحددها صلاحياتك. اطلب من صاحب المحل تغييرها عند الحاجة.')),
-    const SizedBox(height: 24), const Center(child: Text('رفّ • 0.4.0', style: TextStyle(color: Colors.blueGrey))),
+    const SizedBox(height: 24), const Center(child: Text('رفّ • 0.4.1', style: TextStyle(color: Colors.blueGrey))),
   ]);
 
   Future<void> currencyDialog() async {

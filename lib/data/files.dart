@@ -28,12 +28,12 @@ class StoreFiles {
     final sheet = book['Products'];
     book.delete('Sheet1');
     sheet.appendRow(['id', 'name', 'barcode', 'category', 'pack', 'quantity', 'cost_usd',
-      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent', 'unit'].map(TextCellValue.new).toList());
+      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent', 'نوع الصنف'].map(TextCellValue.new).toList());
     for (final p in products) {
       sheet.appendRow([TextCellValue(p.id), TextCellValue(p.name), TextCellValue(p.barcode), TextCellValue(p.category),
         p.pack == p.pack.roundToDouble() ? IntCellValue(p.pack.toInt()) : DoubleCellValue(p.pack), DoubleCellValue(p.quantity), p.costUsd == null ? null : DoubleCellValue(p.costUsd!),
         p.margin == null ? null : DoubleCellValue(p.margin!), p.manualPrice == null ? null : DoubleCellValue(p.manualPrice!),
-        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent), TextCellValue(p.unit)]);
+        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent), TextCellValue(p.byWeight ? 'وزن' : 'طرد')]);
     }
     return book.encode()!;
   }
@@ -68,6 +68,8 @@ class StoreFiles {
       'التعبئة': 'pack', 'الكمية': 'quantity', 'التكلفة': 'cost_usd',
       'تكلفة بالسوري': 'cost_syp', 'رأس المال بالسوري': 'cost_syp', 'عملة التكلفة': 'cost_currency',
       'وحدة البيع': 'unit', 'الوحدة': 'unit', 'سعر الطرد': 'cost_per_pack', 'تكلفة الطرد': 'cost_per_pack',
+      'نوع الصنف': 'unit', 'نوع المادة': 'unit', 'طريقة البيع': 'unit',
+      'عدد القطع بالطرد': 'pack', 'عدد القطع في الطرد': 'pack', 'وزن الطرد بالكيلوغرام': 'pack',
       'نسبة المساومة': 'bargain_percent', 'نسبة الربح': 'margin_percent', 'سعر ثابت': 'manual_price',
     };
     final planned = <Product>[], warnings = <String>[];
@@ -133,8 +135,9 @@ class StoreFiles {
           if (parsed == null || !parsed.isFinite || parsed < 0) { throw FormatException('قيمة غير صالحة في $key'); }
           return parsed;
         }
-        var unit = field('unit') ?? old?.unit ?? 'piece';
-        unit = {'كغ': 'kg', 'كيلو': 'kg', 'كيلوغرام': 'kg', 'قطعة': 'piece', 'عدد': 'piece'}[unit] ?? unit.toLowerCase();
+        // A blank type cell explicitly selects the default (pack). Older files
+        // without the column preserve an existing product's unit.
+        final unit = headers.contains('unit') ? productUnit(field('unit')) : old?.unit ?? 'piece';
         final pack = numeric('pack');
         final units = pack ?? old?.pack ?? 1.0;
         if (!['kg', 'piece'].contains(unit) || units <= 0 || (unit == 'piece' && (units < 1 || units != units.roundToDouble()))) {

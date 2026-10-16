@@ -7,6 +7,7 @@ class WorkerAccess {
     'editExchangeRate': 'تغيير سعر صرف الدولار',
     'addProduct': 'إضافة صنف جديد',
     'deleteProduct': 'حذف صنف',
+    'restoreBackup': 'استعادة نسخة احتياطية',
     'editDetails': 'تعديل الاسم والباركود والتعبئة والوحدة والتصنيف',
     'editQuantity': 'تعديل الكمية المتوفرة',
     'editSalePrice': 'تعديل سعر البيع يدوياً',
@@ -16,7 +17,6 @@ class WorkerAccess {
     'useCalculator': 'استخدام حساب الزبون',
     'viewStocktake': 'رؤية الجرد',
     'countStock': 'إدخال العدد الفعلي أثناء الجرد',
-    'restoreBackup': 'استرجاع نسخة احتياطية (المواد والأسعار والإعدادات)',
     'viewHistory': 'رؤية سجل تغيرات الأسعار',
   };
   final Map<String, bool> _values;
