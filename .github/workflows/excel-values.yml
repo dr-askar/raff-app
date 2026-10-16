@@ -14,4 +14,5 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter test test/mobile_values_test.dart --reporter expanded
+      - run: flutter analyze
+      - run: flutter test --reporter expanded
