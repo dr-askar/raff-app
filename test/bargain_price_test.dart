@@ -63,7 +63,7 @@ void main() {
     expect(find.textContaining('أقل سعر مسموح: 4,900'), findsOneWidget);
     await tester.tap(find.text('حساب زبون')); await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, p.name); await tester.pumpAndSettle();
-    await tester.tap(find.text(p.name)); await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, p.name)); await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('مسح البحث')); await tester.pumpAndSettle();
     expect(find.text('5,000 ل.س'), findsAtLeastNWidgets(1));
     await tester.tap(find.text('اختيار سعر للزبون')); await tester.pumpAndSettle();
