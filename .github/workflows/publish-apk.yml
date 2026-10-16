@@ -2,10 +2,10 @@ name: Publish tested universal APK
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/publish-apk.yml', 'docs/RELEASE_0.3.2.md']
+    paths: ['.github/workflows/publish-apk.yml', 'docs/RELEASE_0.4.0.md']
   workflow_dispatch:
 permissions:
-  actions: write
+  actions: read
   contents: write
 jobs:
   publish:
@@ -14,34 +14,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Publish the exact APK after checking every required validation
+      - name: Mirror the exact published APK after validating the successful release run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(gh run view 38850777908 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = a1004ce3e5d14eb9daf05adaadf3c191e939de9f
-          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/38850777908/jobs?per_page=100" --jq '[.jobs[] | select(.name == "flutter" or .name == "rules" or .name == "install (30)" or .name == "install (35)" or .name == "install (36)" or .name == "install (37)")] | (length == 6 and all(.[]; .conclusion == "success"))')" = true
-          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/38852465680/jobs?per_page=100" --jq '[.jobs[].steps[] | select(.name == "Run reactivecircus/android-emulator-runner@v2")] | (length == 1 and .[0].conclusion == "success")')" = true
-          git diff --exit-code a1004ce3e5d14eb9daf05adaadf3c191e939de9f HEAD -- lib test pubspec.yaml analysis_options.yaml config scripts firestore.rules
+          test "$(gh run view 38918624792 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = d4fa5c98057017b82f503bc327aa4f8a556b7071
+          test "$(gh run view 38918624792 --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)" = success
+          git diff --exit-code d4fa5c98057017b82f503bc327aa4f8a556b7071 HEAD -- lib test pubspec.yaml analysis_options.yaml config scripts firestore.rules
           RAFF_HEAD=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
           test "$RAFF_HEAD" = "$GITHUB_SHA"
           mkdir -p apk
-          gh run download 38850777908 --repo "$GITHUB_REPOSITORY" --name raff-demo-apk --dir apk
-          echo '5f8082f3f0da213e93961d543c3b84ae4294888876e9f2854d08c48f65d5ec0c  apk/app-release.apk' | sha256sum --check
-          cp apk/app-release.apk apk/raff-0.3.2-universal.apk
-          if gh release view demo-36 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload demo-36 apk/raff-0.3.2-universal.apk --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit demo-36 --repo "$GITHUB_REPOSITORY" --notes-file docs/RELEASE_0.3.2.md
-          else
-            gh release create demo-36 apk/raff-0.3.2-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'رفّ 0.3.2 — استيراد ومساومة' --notes-file docs/RELEASE_0.3.2.md
-          fi
+          gh run download 38918624792 --repo "$GITHUB_REPOSITORY" --name raff-demo-apk --dir apk
+          test "$(cat apk/apk-version.txt)" = 0.4.0
+          echo '8f5647916554a2477a1f8f184a40e140410db4ca4ab23c725911bf952760f542  apk/app-release.apk' | sha256sum --check
           cp apk/app-release.apk apk/raff.apk
-          if gh release view demo-universal --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload demo-universal apk/raff.apk --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit demo-universal --repo "$GITHUB_REPOSITORY" --title 'رفّ 0.3.2 — نسخة Android موحدة' --notes-file docs/RELEASE_0.3.2.md
-          else
-            gh release create demo-universal apk/raff.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'رفّ 0.3.2 — نسخة Android موحدة' --notes-file docs/RELEASE_0.3.2.md
-          fi
-          RAFF_OLD_STATE=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/38850777908" --jq 'if .run_attempt == 1 then .status else "skip" end')
-          if [ "$RAFF_OLD_STATE" = "in_progress" ]; then
-            gh run cancel 38850777908 --repo "$GITHUB_REPOSITORY" || echo 'The superseded run already stopped.'
-          fi
+          gh release edit demo-56 --repo "$GITHUB_REPOSITORY" --notes-file docs/RELEASE_0.4.0.md
+          gh release upload demo-universal apk/raff.apk --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit demo-universal --repo "$GITHUB_REPOSITORY" --title 'رفّ 0.4.0 — الطرود والوزن وDrive' --notes-file docs/RELEASE_0.4.0.md
