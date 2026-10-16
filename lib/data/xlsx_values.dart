@@ -29,6 +29,12 @@ List<int> normalizeXlsxValues(List<int> bytes) {
     for (final xf in styleDoc.findAllElements('xf')) { xf.setAttribute('numFmtId', '0'); }
     for (final formats in styleDoc.findAllElements('numFmts').toList()) { formats.parent?.children.remove(formats); }
   }
+  // Resolve the original shared-string indices before handing the workbook to
+  // excel 4. It deduplicates identical entries but keeps cell indices unchanged.
+  // Some editors leave duplicate and unused entries after adding more rows.
+  final sharedFile = archive.findFile('xl/sharedStrings.xml');
+  final shared = sharedFile == null ? <String>[] : XmlDocument.parse(
+    utf8.decode(sharedFile.content as List<int>)).findAllElements('si').map(_xlsxText).toList();
   final output = Archive();
   for (final file in archive.files) {
     if (!file.isFile) { continue; }
@@ -37,6 +43,19 @@ List<int> normalizeXlsxValues(List<int> bytes) {
     if (file.name.startsWith('xl/worksheets/') && file.name.endsWith('.xml')) {
       final doc = XmlDocument.parse(utf8.decode(data));
       for (final cell in doc.findAllElements('c')) {
+        if (cell.getAttribute('t') == 's') {
+          final index = int.tryParse(cell.findElements('v').firstOrNull?.innerText ?? '');
+          if (index == null || index < 0 || index >= shared.length) {
+            throw const FormatException('مرجع نص غير صالح داخل ملف Excel. أعد حفظ الملف بصيغة xlsx.');
+          }
+          cell.children.clear();
+          cell.setAttribute('t', 'inlineStr');
+          final prefix = cell.name.prefix;
+          cell.children.add(XmlElement(XmlName('is', prefix), [], [XmlElement(
+            XmlName('t', prefix), [XmlAttribute(XmlName('space', 'xml'), 'preserve')],
+            [XmlText(shared[index])])]));
+          continue;
+        }
         if (cell.getAttribute('t') != null && cell.getAttribute('t') != 'n') { continue; }
         final value = cell.findElements('v').firstOrNull;
         if (value == null || value.innerText.trim().isEmpty) { continue; }
@@ -54,3 +73,8 @@ List<int> normalizeXlsxValues(List<int> bytes) {
   }
   return ZipEncoder().encode(output)!;
 }
+
+String _xlsxText(XmlElement item) => item.children.whereType<XmlElement>()
+  .expand((node) => node.name.local == 't' ? [node] :
+    node.name.local == 'r' ? node.findElements('t') : <XmlElement>[])
+  .map((node) => node.innerText).join();
