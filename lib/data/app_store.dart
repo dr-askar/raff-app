@@ -12,8 +12,12 @@ import 'owner_lock.dart';
 class ImportResult {
   final int added, updated;
   final List<String> errors;
-  const ImportResult({required this.added, required this.updated, required this.errors});
+  final int unprocessed;
+  final String? stoppedReason;
+  const ImportResult({required this.added, required this.updated, required this.errors,
+    this.unprocessed = 0, this.stoppedReason});
   int get saved => added + updated;
+  int get failed => errors.length;
 }
 
 class AppStore extends ChangeNotifier {
@@ -299,7 +303,9 @@ class AppStore extends ChangeNotifier {
     PriceChange(name: name, actor: actor, kind: kind,
       at: DateTime.now().toUtc().toIso8601String(), before: before, after: after);
 
-  Future<void> saveProduct(Product product, {int? expectedRevision}) async {
+  Future<void> saveProduct(Product product, {int? expectedRevision}) =>
+    _saveProduct(product, expectedRevision: expectedRevision);
+  Future<void> _saveProduct(Product product, {int? expectedRevision, bool deferLocalPersist = false}) async {
     product.validate();
     final baseSettings = settings;
     final old = findId(product.id);
@@ -359,7 +365,7 @@ class AppStore extends ChangeNotifier {
     } else {
       products = [...products.where((p) => p.id != product.id), product];
       history.insert(0, change);
-      await _persist(); notifyListeners();
+      if (!deferLocalPersist) { await _persist(); notifyListeners(); }
     }
   }
 
@@ -368,6 +374,12 @@ class AppStore extends ChangeNotifier {
     final product = findId(line.id);
     if (product == null || !product.ready) { throw const FormatException('المادة غير موجودة أو غير مسعرة.'); }
     line.setDiscount(percent, product.bargainPercent);
+  }
+  void applyBargainPrice(CartLine line, double price) {
+    _require(can('useCalculator') && can('applyBargain'));
+    final product = findId(line.id);
+    if (product == null || !product.ready) { throw const FormatException('المادة غير موجودة أو غير مسعرة.'); }
+    line.setSellingPrice(price, product.bargainPercent);
   }
   double basketTotal(List<CartLine> lines) => lines.fold<double>(0, (amount, line) {
     final product = findId(line.id);
@@ -401,26 +413,60 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ImportResult> importProducts(List<Product> rows, {required int settingsRevision}) async {
+  Future<ImportResult> importProducts(List<Product> rows, {required int settingsRevision,
+    void Function(int processed, int total)? onProgress}) async {
     _requireOwner();
     var added = 0, updated = 0;
     final errors = <String>[];
-    for (var index = 0; index < rows.length; index++) {
-      final p = rows[index];
-      if (settings.revision != settingsRevision) {
-        errors.add('تغيرت إعدادات الأسعار. بقيت ${rows.length - index} مادة دون حفظ؛ أعد معاينة الملف.');
-        break;
+    onProgress?.call(0, rows.length);
+    // Chunk size is a save checkpoint, never a limit on the number of products.
+    final chunkSize = cloud ? 1 : 50;
+    for (var start = 0; start < rows.length; start += chunkSize) {
+      final end = start + chunkSize < rows.length ? start + chunkSize : rows.length;
+      if (!owner || !usable || settings.revision != settingsRevision) {
+        return ImportResult(added: added, updated: updated, errors: errors,
+          unprocessed: rows.length - start,
+          stoppedReason: !owner || !usable ? 'توقفت العملية بسبب تغير صلاحية المدير.' : 'تغيرت إعدادات الأسعار؛ أعد معاينة الأصناف المتبقية.');
       }
-      final existed = findId(p.id) != null;
-      try {
-        await saveProduct(p, expectedRevision: p.revision - 1);
-        if (existed) { updated++; } else { added++; }
-      } on FormatException catch (e) {
-        errors.add('${p.name}: ${e.message}');
-      } catch (_) {
-        errors.add('${p.name}: تعذر الحفظ أو المزامنة. بقيت ${rows.length - index} مادة دون حفظ؛ تحقق من الاتصال والصلاحيات.');
-        break;
+      final previousProducts = products;
+      final previousHistory = List<PriceChange>.of(history);
+      final accepted = <Product>[];
+      var chunkAdded = 0, chunkUpdated = 0;
+      for (var index = start; index < end; index++) {
+        final p = rows[index];
+        final existed = findId(p.id) != null;
+        try {
+          await _saveProduct(p, expectedRevision: p.revision - 1, deferLocalPersist: !cloud);
+          accepted.add(p);
+          if (existed) { chunkUpdated++; } else { chunkAdded++; }
+        } on FormatException catch (e) {
+          errors.add('${p.name}: ${e.message}');
+        } catch (_) {
+          errors.add('${p.name}: تعذر الحفظ؛ تحقق من الاتصال ومساحة التخزين والصلاحيات.');
+          if (!cloud) {
+            products = previousProducts; history = previousHistory;
+            for (final row in accepted) { errors.add('${row.name}: لم يتم حفظ دفعة هذه المادة على الجهاز.'); }
+            notifyListeners();
+          }
+          return ImportResult(added: added, updated: updated, errors: errors,
+            unprocessed: rows.length - index - 1, stoppedReason: 'توقفت العملية؛ الأصناف المحفوظة سابقاً باقية.');
+        }
       }
+      if (!cloud && accepted.isNotEmpty) {
+        try { await _persist(); }
+        catch (_) {
+          products = previousProducts; history = previousHistory;
+          for (final p in accepted) { errors.add('${p.name}: لم يتم حفظ دفعة هذه المادة على الجهاز.'); }
+          notifyListeners();
+          return ImportResult(added: added, updated: updated, errors: errors,
+            unprocessed: rows.length - end, stoppedReason: 'تعذر الحفظ على الجهاز؛ تحقق من مساحة التخزين ثم أعد المحاولة.');
+        }
+        notifyListeners();
+      }
+      added += chunkAdded; updated += chunkUpdated;
+      onProgress?.call(end, rows.length);
+      // Give the phone time to paint progress and handle input between checkpoints.
+      await Future<void>.delayed(Duration.zero);
     }
     return ImportResult(added: added, updated: updated, errors: errors);
   }
@@ -636,3 +682,4 @@ class AppStore extends ChangeNotifier {
   @override
   void dispose() { for (final s in _subscriptions) { unawaited(s.cancel()); } super.dispose(); }
 }
+

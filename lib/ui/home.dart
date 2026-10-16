@@ -23,6 +23,9 @@ class _HomeState extends State<Home> {
   final selected = <String>{};
   int tab = 0;
   String category = 'الكل'; bool busy = false;
+  int importDone = 0, importTotal = 0;
+  bool importing = false;
+  double minimumFor(Product p) => s.can('applyBargain') ? p.minimumPrice(s.settings) : p.price(s.settings);
   @override
   void dispose() { search.dispose(); super.dispose(); }
   Future<void> action(Future<void> Function() task, [String message = 'تم الحفظ بنجاح']) async {
@@ -96,7 +99,8 @@ class _HomeState extends State<Home> {
     body: SafeArea(child: Column(children: [
       Container(width: double.infinity, color: s.fromCache || !s.cloud ? const Color(0xfffff2d9) : const Color(0xffe3f2eb),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8), child: Text(s.syncLabel, style: const TextStyle(fontSize: 12))),
-      if (busy) const LinearProgressIndicator(),
+      if (busy) LinearProgressIndicator(value: importing && importTotal > 0 ? importDone / importTotal : null),
+      if (importing) Padding(padding: const EdgeInsets.all(8), child: Text('جاري الاستيراد: $importDone من $importTotal صنف — اترك التطبيق مفتوحاً')),
       if (s.error.isNotEmpty) Padding(padding: const EdgeInsets.all(8), child: Text(s.error, style: const TextStyle(color: Colors.red))),
       Expanded(child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1000), child:
         s.cloud && !s.loaded ? const Center(child: CircularProgressIndicator()) : switch (tab) {
@@ -151,7 +155,7 @@ class _HomeState extends State<Home> {
               if (!selected.add(p.id)) { selected.remove(p.id); }
             })) : const Icon(Icons.inventory_2_outlined),
             title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Padding(padding: const EdgeInsets.only(top: 6), child: Text('${p.category} • ${money(p.quantity)} قطعة • الكرتونة ${p.pack}\n${p.manualPrice == null ? 'سعر تلقائي' : 'سعر ثابت'}${s.can('viewCost') && p.hasCost ? ' • تكلفة القطعة ${money(p.costCurrency == 'SYP' ? p.costLocal! : p.costUsd!)} ${p.costCurrency == 'SYP' ? 'ل.س' : '\$'}' : ''}')),
+            subtitle: Padding(padding: const EdgeInsets.only(top: 6), child: Text('${p.category} • ${money(p.quantity)} قطعة • الكرتونة ${p.pack}\n${p.manualPrice == null ? 'سعر تلقائي' : 'سعر ثابت'}${s.can('viewCost') && p.hasCost ? ' • تكلفة القطعة ${money(p.costCurrency == 'SYP' ? p.costLocal! : p.costUsd!)} ${p.costCurrency == 'SYP' ? 'ل.س' : '\$'}' : ''}${p.ready ? '\nأقل سعر مسموح: ${money(minimumFor(p))} ${s.settings.currency}' : ''}')),
             isThreeLine: true,
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               Text(p.ready ? '${money(p.price(s.settings))}\n${s.settings.currency}' : 'يحتاج\nتسعيراً', textAlign: TextAlign.center,
@@ -173,17 +177,40 @@ class _HomeState extends State<Home> {
     }, 'تم حذف المادة');
   }
   Future<void> bargain(CartLine line) async {
-    final p = s.findId(line.id); if (p == null || !s.can('applyBargain')) { return; }
-    final percent = await numberDialog('مساومة: ${line.name}', 'نسبة التخفيض، الحد الأقصى ${money(p.bargainPercent)}%', initial: line.discountPercent);
-    if (percent == null || !mounted) { return; }
-    await action(() async { s.applyBargain(line, percent); }, 'تم تطبيق المساومة على السلة');
+    if (!s.can('applyBargain') || s.findId(line.id) == null) { return; }
+    final controller = TextEditingController(text: line.sellingPrice.toString());
+    String? error;
+    final saved = await showDialog<bool>(context: context, builder: (ctx) =>
+      ListenableBuilder(listenable: s, builder: (ctx, _) => StatefulBuilder(builder: (ctx, change) {
+        final product = s.findId(line.id);
+        final limit = s.can('applyBargain') ? product?.bargainPercent ?? 0 : 0.0;
+        return AlertDialog(title: const Text('تحديد سعر القطعة'), scrollable: true,
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(line.name), const SizedBox(height: 8),
+            Text('سعر المبيع: ${money(line.unitPrice)} ${s.settings.currency}'),
+            Text('أقل سعر مسموح: ${money(line.minimumPrice(limit))} ${s.settings.currency}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16), TextField(key: const ValueKey('bargain-price'), controller: controller, autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(labelText: 'السعر المتفق عليه للقطعة', errorText: error)),
+          ]), actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('رجوع')),
+            FilledButton(onPressed: () {
+              final price = parseAmount(controller.text);
+              if (price == null || !price.isFinite) { change(() => error = 'أدخل سعراً صحيحاً'); return; }
+              try { s.applyBargainPrice(line, price); Navigator.pop(ctx, true); }
+              on FormatException catch (e) { change(() => error = e.message); }
+            }, child: const Text('اعتماد السعر')),
+          ]);
+      })));
+    Future<void>.delayed(const Duration(milliseconds: 300), controller.dispose);
+    if (saved == true && mounted) { setState(() {}); }
   }
 
   Future<void> productDetails(Product product) => showDialog(context: context, builder: (ctx) =>
     ListenableBuilder(listenable: s, builder: (ctx, _) {
       final p = s.findId(product.id);
       return AlertDialog(title: Text(p?.name ?? 'الصنف محذوف'),
-        content: p == null ? null : Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${p.pack} قطعة\nالمتوفر: ${money(p.quantity)} قطعة\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}${s.can('viewCost') && p.hasCost ? '\nتكلفة القطعة: ${money(p.localCost(s.settings.rate)!)} ل.س' : ''}${s.can('viewMargin') ? '\nنسبة الربح: ${money(p.effectiveMargin(s.settings))}%' : ''}\nنسبة المساومة: ${money(p.bargainPercent)}%'),
+        content: p == null ? null : Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${p.pack} قطعة\nالمتوفر: ${money(p.quantity)} قطعة\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}${s.can('viewCost') && p.hasCost ? '\nتكلفة القطعة: ${money(p.localCost(s.settings.rate)!)} ل.س' : ''}${s.can('viewMargin') ? '\nنسبة الربح: ${money(p.effectiveMargin(s.settings))}%' : ''}${p.ready ? '\nأقل سعر مسموح: ${money(minimumFor(p))} ${s.settings.currency}' : ''}'),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))]);
     }));
 
@@ -200,19 +227,26 @@ class _HomeState extends State<Home> {
 
   Widget basket() {
     final total = s.basketTotal(cart);
+    final matches = filtered;
     return !s.can('useCalculator') ? const EmptyState('حساب الزبون مقفل', 'اطلب من صاحب المحل تفعيل الصلاحية.') : Column(children: [
     const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4), child: Align(alignment: AlignmentDirectional.centerStart,
       child: Text('حساب الزبون', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)))),
     const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Text('امسح المادة، أو ابحث واضغط لإضافتها. السلة لا تخصم المخزون.')),
     searchBar(basket: true),
-    if (search.text.trim().isNotEmpty) SizedBox(height: 160, child: ListView(children: filtered.take(20).map((p) => ListTile(
-      title: Text(p.name), trailing: const Icon(Icons.add_circle_outline), subtitle: Text(p.ready ? '${money(p.price(s.settings))} ${s.settings.currency}' : 'يحتاج تسعيراً'), onTap: () => addToCart(p))).toList())),
+    if (search.text.trim().isNotEmpty) SizedBox(height: 160, child: ListView.builder(itemCount: matches.length, itemBuilder: (context, index) {
+      final p = matches[index];
+      return ListTile(title: Text(p.name), trailing: const Icon(Icons.add_circle_outline),
+        subtitle: Text(p.ready ? 'سعر المبيع: ${money(p.price(s.settings))} ${s.settings.currency}\nأقل سعر مسموح: ${money(minimumFor(p))} ${s.settings.currency}' : 'يحتاج تسعيراً'), onTap: () => addToCart(p));
+    })),
     Expanded(child: cart.isEmpty ? const EmptyState('السلة فارغة', 'ابدأ بمسح باركود أول مادة.', icon: Icons.shopping_basket_outlined) : ListView.builder(
       padding: const EdgeInsets.all(16), itemCount: cart.length, itemBuilder: (context, i) {
         final line = cart[i]; return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [
           Row(children: [Expanded(child: Text(line.name, style: const TextStyle(fontWeight: FontWeight.bold))), Text('${money(line.total)} ${s.settings.currency}')]),
-          if (s.can('applyBargain') && (s.findId(line.id)?.bargainPercent ?? 0) > 0) Align(alignment: AlignmentDirectional.centerStart, child: TextButton.icon(onPressed: busy ? null : () => bargain(line), icon: const Icon(Icons.percent), label: Text('مساومة حتى ${money(s.findId(line.id)!.bargainPercent)}%'))),
-          Row(children: [Expanded(child: Text('${money(line.sellingPrice)} للقطعة${line.discountPercent > 0 ? ' • مساومة ${money(line.discountPercent)}%' : ''}')), IconButton(tooltip: 'إنقاص', onPressed: () => setState(() {
+          Align(alignment: AlignmentDirectional.centerStart, child: Text('سعر المبيع: ${money(line.unitPrice)} ${s.settings.currency}')),
+          Align(alignment: AlignmentDirectional.centerStart, child: Text('أقل سعر مسموح: ${money(line.minimumPrice(s.can('applyBargain') ? s.findId(line.id)?.bargainPercent ?? 0 : 0))} ${s.settings.currency}')),
+          if (s.can('applyBargain') && (s.findId(line.id)?.bargainPercent ?? 0) > 0) Align(alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(onPressed: busy ? null : () => bargain(line), icon: const Icon(Icons.price_change_outlined), label: const Text('اختيار سعر للزبون'))),
+          Row(children: [Expanded(child: Text('${money(line.sellingPrice)} للقطعة${line.discountPercent > 0 ? ' • مراعاة ${money(line.unitPrice - line.sellingPrice)} ${s.settings.currency}' : ''}')), IconButton(tooltip: 'إنقاص', onPressed: () => setState(() {
             if (line.quantity > 1) { line.quantity--; } else { cart.removeAt(i); }
           }), icon: const Icon(Icons.remove_circle_outline)),
             Text('${line.quantity}', style: const TextStyle(fontSize: 18)),
@@ -340,18 +374,32 @@ class _HomeState extends State<Home> {
       if (picked.files.single.size > 5 * 1024 * 1024) { throw const FormatException('استخدم ملفاً أصغر من 5 ميغابايت.'); }
       final settingsRevision = s.settings.revision;
       final plan = StoreFiles.preview(picked.files.single.bytes!, s.products, s.settings, s.newId);
-      final preview = '${plan.added} مادة جديدة • ${plan.updated} تحديث\n${plan.warnings.length} صفوف تحتاج مراجعة\n\n${plan.warnings.take(10).join('\n')}\n\n${plan.products.take(5).map((p) => '${p.name}: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'}').join('\n')}\n\nيتم حفظ الصفوف الصالحة فقط، كل مادة على حدة.';
-      if (!mounted || plan.products.isEmpty) { throw FormatException('لا توجد مواد صالحة للاستيراد.\n${plan.warnings.take(5).join('\n')}'); }
-      if (!await confirm(context, 'معاينة الاستيراد', preview)) { return; }
-      final result = await s.importProducts(plan.products, settingsRevision: settingsRevision);
+      final preview = 'إجمالي الصفوف: ${plan.total} من ${plan.sheets} أوراق أصناف\n${plan.added} صنف جديد • ${plan.updated} تحديث\n${plan.skipped} صفوف متجاوزة\n\n${plan.warnings.take(10).join('\n')}\n\nعينة للمعاينة فقط؛ سيُحفظ كل ${plan.products.length} صنفاً صالحاً:\n${plan.products.take(5).map((p) => p.name).join('\n')}';
       if (!mounted) { return; }
+      if (plan.products.isNotEmpty) {
+        final accepted = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('معاينة الاستيراد'), scrollable: true, content: Text(preview), actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('رجوع')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text('استيراد ${plan.products.length} صنف')),
+          ]));
+        if (accepted != true || !mounted) { return; }
+      }
+      setState(() { importing = true; importDone = 0; importTotal = plan.products.length; });
+      late final ImportResult result;
+      try {
+        result = await s.importProducts(plan.products, settingsRevision: settingsRevision, onProgress: (done, total) {
+          if (mounted) { setState(() { importDone = done; importTotal = total; }); }
+        });
+      } finally { if (mounted) { setState(() => importing = false); } }
+      if (!mounted) { return; }
+      setState(() { search.clear(); category = 'الكل'; });
       final issues = [...plan.warnings, ...result.errors];
-      final report = 'أُضيفت ${result.added} مادة جديدة\nتحدثت ${result.updated} مادة موجودة\n${issues.length} ملاحظات\n\n${issues.join('\n')}';
+      final report = 'إجمالي صفوف الملف: ${plan.total}\nأُضيفت ${result.added} أصناف جديدة\nتحدثت ${result.updated} أصناف موجودة\nتجاوزت المعاينة ${plan.skipped} صفوف\nتعذر حفظ ${result.failed} أصناف\nلم تُعالج ${result.unprocessed} أصناف\n${result.stoppedReason ?? ''}\n\n${issues.join('\n')}';
       await showDialog<void>(context: context, builder: (ctx) => AlertDialog(
-        title: Text(result.saved == 0 ? 'لم تُحفظ مواد' : 'نتيجة الاستيراد'),
+        title: Text(result.saved == 0 ? 'لم تُحفظ أصناف' : 'نتيجة الاستيراد'),
         content: SingleChildScrollView(child: Text(report)),
         actions: [
-          if (issues.isNotEmpty) TextButton(onPressed: () => perform(ctx, () => StoreFiles.shareBytes(utf8.encode(report), 'raff-import-report.txt', 'text/plain'), 'تقرير الاستيراد جاهز'), child: const Text('حفظ التقرير')),
+          TextButton(onPressed: () => perform(ctx, () => StoreFiles.shareBytes(utf8.encode(report), 'raff-import-report.txt', 'text/plain'), 'تقرير الاستيراد جاهز'), child: const Text('حفظ التقرير')),
           FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
         ],
       ));
@@ -365,3 +413,4 @@ class _HomeState extends State<Home> {
     if (await confirm(context, 'استرجاع النسخة', s.cloud ? 'دمج مواد النسخة وتحديث إعدادات المحل. لن تُحذف المواد الأخرى. الاستعادة لا تشمل الجرد والسجل القديم في الوضع السحابي.' : 'سيتم استبدال بيانات هذا الجهاز بالنسخة. احفظ نسخة حالية قبل المتابعة.')) { await s.restore(data); }
   }, 'تم استرجاع النسخة');
 }
+

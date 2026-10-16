@@ -37,10 +37,16 @@ jobs:
           unzip -t "$RAFF_APK" | tail -1
           python3 scripts/check_apk_native.py "$RAFF_APK"
           sha256sum "$RAFF_APK"
+      - name: Record application version for the release filename
+        run: |
+          RAFF_BUILD_VERSION=$(sed -n 's/^version: *//p' pubspec.yaml)
+          printf '%s\n' "${RAFF_BUILD_VERSION%%+*}" > build/app/outputs/flutter-apk/apk-version.txt
       - uses: actions/upload-artifact@v4
         with:
           name: raff-demo-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/apk-version.txt
   rules:
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[publish-only]')
     runs-on: ubuntu-latest
@@ -131,6 +137,9 @@ jobs:
             echo "Newer commit exists; APK remains available as an artifact."
             exit 0
           fi
-          cp apk/app-release.apk apk/raff-0.3.1-universal.apk
+          RAFF_VERSION=$(cat apk/apk-version.txt)
+          RAFF_ASSET="apk/raff-$RAFF_VERSION-universal.apk"
+          cp apk/app-release.apk "$RAFF_ASSET"
           RAFF_TAG="demo-${GITHUB_RUN_NUMBER}"
-          gh release create "$RAFF_TAG" apk/raff-0.3.1-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ 0.3.1 — توافق أندرويد" --notes "ملف موحد ARM32 وARM64 وx86_64. Android 7 أو أحدث. تم فحص التوقيع وتثبيت التطبيق وفتحه على محاكيات Android 7 و11 و15 و16 و17 بوضع 16KB. هذا لا يضمن كل أجهزة الشركات؛ الكاميرا تحتاج تجربة على هاتف حقيقي. نسخة محلية دون مزامنة Firebase مفعّلة. احفظ نسخة بيانات قبل تحديث إصدار قديم."
+          gh release create "$RAFF_TAG" "$RAFF_ASSET" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ $RAFF_VERSION — استيراد ومساومة" --notes "استيراد جميع صفوف أوراق الأصناف مع عداد تقدم وتقرير، واختيار سعر الزبون بين سعر المبيع والحد الأدنى. ملف موحد ARM32 وARM64 وx86_64. Android 7 أو أحدث. تم فحص التوقيع وتثبيت التطبيق وفتحه على محاكيات Android 7 و11 و15 و16 و17 بوضع 16KB. هذا لا يضمن كل أجهزة الشركات؛ الكاميرا تحتاج تجربة على هاتف حقيقي. نسخة محلية دون مزامنة Firebase مفعّلة. احفظ نسخة بيانات قبل تحديث إصدار قديم."
+

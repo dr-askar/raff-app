@@ -117,13 +117,27 @@ class CartLine {
   final String id, name;
   final double unitPrice;
   int quantity;
-  double discountPercent = 0;
+  double _discountPercent = 0;
+  double? _chosenPrice;
+  double get discountPercent => _discountPercent;
+  set discountPercent(double value) { _discountPercent = value; _chosenPrice = null; }
   CartLine({required this.id, required this.name, required this.unitPrice, this.quantity = 1});
-  double get sellingPrice => unitPrice * (1 - discountPercent / 100);
+  double get sellingPrice => _chosenPrice ?? unitPrice * (1 - discountPercent / 100);
+  double minimumPrice(double allowedMaximum) => unitPrice * (1 - allowedMaximum / 100);
   double get total => sellingPrice * quantity;
   void setDiscount(double percent, double allowedMaximum) {
     if (!percent.isFinite || percent < 0 || percent > allowedMaximum || percent > 100) { throw const FormatException('نسبة المساومة تتجاوز الحد المسموح لهذه المادة.'); }
     discountPercent = percent;
+  }
+  void setSellingPrice(double price, double allowedMaximum) {
+    if (!allowedMaximum.isFinite || allowedMaximum < 0 || allowedMaximum > 100 ||
+        !price.isFinite || price < minimumPrice(allowedMaximum) || price > unitPrice) {
+      throw const FormatException('اختر سعراً بين أقل سعر مسموح وسعر المبيع.');
+    }
+    final percent = unitPrice == 0 ? 0.0 : (unitPrice - price) * 100 / unitPrice;
+    // Keep the exact entered amount; percentage is retained for permission/limit changes.
+    discountPercent = percent > allowedMaximum ? allowedMaximum : percent;
+    _chosenPrice = price;
   }
 }
 
@@ -154,3 +168,4 @@ class Stocktake {
 // Old snapshots have no currency field and remain dollar-based.
 double snapshotCost(Json row, double rate) => row['costCurrency'] == 'SYP'
   ? number(row['costLocal']) : number(row['costUsd']) * rate;
+

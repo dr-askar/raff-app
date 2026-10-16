@@ -1,5 +1,15 @@
 import 'package:flutter/material.dart';
 
+double? parseAmount(String value) {
+  var text = value.trim().replaceAllMapped(RegExp('[٠-٩۰-۹]'), (m) {
+    final code = m[0]!.codeUnitAt(0);
+    return '${code >= 0x6f0 ? code - 0x6f0 : code - 0x660}';
+  }).replaceAll(RegExp(r'[\s\u00a0]'), '').replaceAll('٬', '').replaceAll('٫', '.');
+  if (RegExp(r'^\d{1,3}(,\d{3})+(\.\d+)?$').hasMatch(text)) { text = text.replaceAll(',', ''); }
+  else if (!text.contains('.') && ','.allMatches(text).length == 1) { text = text.replaceAll(',', '.'); }
+  return double.tryParse(text);
+}
+
 String money(num n) => n.toStringAsFixed(n == n.roundToDouble() ? 0 : 2)
   .replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
 
@@ -31,3 +41,4 @@ class EmptyState extends StatelessWidget {
     const SizedBox(height: 8), Text(detail, textAlign: TextAlign.center, style: const TextStyle(color: Colors.blueGrey)),
   ]))));
 }
+

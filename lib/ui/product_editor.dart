@@ -129,11 +129,12 @@ class _ProductEditorState extends State<ProductEditor> {
             if (fixed) field(manual, 'سعر القطعة بالعملة المحلية', numeric: true),
           ],
           if (s.owner) field(bargain, 'نسبة المساومة % — من 0 إلى 100', numeric: true),
-          if (!s.owner) Text('نسبة المساومة المسموحة: ${money(base?.bargainPercent ?? 0)}%'),
           const Text('المساومة تخفيض للزبون في السلة فقط، ولا تغيّر سعر الصنف المحفوظ.'),
           Card(color: const Color(0xffe3eef9), child: Padding(padding: const EdgeInsets.all(20), child: Column(children: [
-            const Text('معاينة سعر القطعة'), Text('${money(sale)} ${s.settings.currency}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            const Text('سعر المبيع للقطعة'), Text('${money(sale)} ${s.settings.currency}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            Text('أقل سعر مسموح: ${money(sale * (1 - (s.can('applyBargain') ? (double.tryParse(bargain.text) ?? 0).clamp(0, 100) : 0) / 100))} ${s.settings.currency}'),
           ]))), const SizedBox(height: 20),
         ])))));
   });
 }
+
