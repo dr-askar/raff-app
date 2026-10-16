@@ -16,6 +16,7 @@ class WorkerAccess {
     'useCalculator': 'استخدام حساب الزبون',
     'viewStocktake': 'رؤية الجرد',
     'countStock': 'إدخال العدد الفعلي أثناء الجرد',
+    'restoreBackup': 'استرجاع نسخة احتياطية (المواد والأسعار والإعدادات)',
     'viewHistory': 'رؤية سجل تغيرات الأسعار',
   };
   final Map<String, bool> _values;
@@ -38,3 +39,4 @@ class WorkerAccess {
     return WorkerAccess.fromJson(next);
   }
 }
+

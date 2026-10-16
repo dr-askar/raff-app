@@ -305,14 +305,14 @@ class AppStore extends ChangeNotifier {
 
   Future<void> saveProduct(Product product, {int? expectedRevision}) =>
     _saveProduct(product, expectedRevision: expectedRevision);
-  Future<void> _saveProduct(Product product, {int? expectedRevision, bool deferLocalPersist = false}) async {
+  Future<void> _saveProduct(Product product, {int? expectedRevision, bool deferLocalPersist = false, bool restoring = false}) async {
     product.validate();
     final baseSettings = settings;
     final old = findId(product.id);
-    _require(old == null ? can('addProduct') : canEditProduct);
-    if (!owner) {
+    _require(restoring ? can('restoreBackup') : old == null ? can('addProduct') : canEditProduct);
+    if (!owner && !restoring) {
       final base = old ?? Product(id: product.id, name: product.name);
-      if (old != null && !can('editDetails') && (product.name != base.name || product.category != base.category || product.barcode != base.barcode || product.pack != base.pack)) { _require(false); }
+      if (old != null && !can('editDetails') && (product.name != base.name || product.category != base.category || product.barcode != base.barcode || product.pack != base.pack || product.unit != base.unit)) { _require(false); }
       if (!can('editQuantity') && product.quantity != base.quantity) { _require(false); }
       if (!can('editSalePrice') && product.manualPrice != base.manualPrice) { _require(false); }
       if (!can('editSalePrice') && !can('editCost') && !can('editMargin') && product.ready != base.ready) { _require(false); }
@@ -356,11 +356,13 @@ class AppStore extends ChangeNotifier {
         if (previousBarcode.isNotEmpty && previousBarcode != product.barcode) { tx.delete(_barcode(previousBarcode)); }
         if (product.barcode.isNotEmpty && previousBarcode != product.barcode) { tx.set(_barcode(product.barcode), {'productId': product.id}); }
         tx.set(ref, {...product.toJson(), 'updatedBy': uid, 'updatedAt': FieldValue.serverTimestamp()});
-        if (can('editCost')) { tx.set(root.collection('costs').doc(product.id), product.costJson()); }
-        if (can('editMargin')) { tx.set(root.collection('margins').doc(product.id), product.marginJson()); }
+        if (can('editCost') || restoring) { tx.set(root.collection('costs').doc(product.id), product.costJson()); }
+        if (can('editMargin') || restoring) { tx.set(root.collection('margins').doc(product.id), product.marginJson()); }
         tx.set(root.collection('priceChanges').doc(), {...change.toJson(), 'uid': uid});
       });
-      _public[product.id] = product.toJson(); _pricing[product.id] = product.costJson(); _margins[product.id] = product.marginJson();
+      _public[product.id] = product.toJson();
+      if (can('viewCost')) { _pricing[product.id] = product.costJson(); }
+      if (can('viewMargin')) { _margins[product.id] = product.marginJson(); }
       _rebuild(); notifyListeners();
     } else {
       products = [...products.where((p) => p.id != product.id), product];
@@ -382,6 +384,7 @@ class AppStore extends ChangeNotifier {
     line.setSellingPrice(price, product.bargainPercent);
   }
   double basketTotal(List<CartLine> lines) => lines.fold<double>(0, (amount, line) {
+    line.setQuantity(line.quantity);
     final product = findId(line.id);
     final allowed = can('applyBargain') && can('useCalculator') && product != null && product.ready ? product.bargainPercent : 0.0;
     if (!line.discountPercent.isFinite || line.discountPercent < 0) { line.setDiscount(0, 0); }
@@ -471,9 +474,10 @@ class AppStore extends ChangeNotifier {
     return ImportResult(added: added, updated: updated, errors: errors);
   }
 
-  Future<void> changeSettings(double rate, double margin, String currency) async {
-    _require(can('editExchangeRate'));
-    if (!owner && (margin != settings.margin || currency != settings.currency)) { _require(false); }
+  Future<void> changeSettings(double rate, double margin, String currency) => _changeSettings(rate, margin, currency);
+  Future<void> _changeSettings(double rate, double margin, String currency, {bool restoring = false}) async {
+    _require(restoring ? can('restoreBackup') : can('editExchangeRate'));
+    if (!owner && !restoring && (margin != settings.margin || currency != settings.currency)) { _require(false); }
     final previous = settings;
     if (!rate.isFinite || rate <= 0 || !margin.isFinite || margin < 0 || currency.trim().isEmpty) {
       throw const FormatException('أدخل سعر صرف موجباً وربحاً غير سالب واسم العملة.');
@@ -547,7 +551,7 @@ class AppStore extends ChangeNotifier {
       rate: settings.rate, currency: settings.currency,
       productIds: products.map((p) => p.id).toList(),
       snapshot: {for (final p in products) p.id: {'name': p.name, 'barcode': p.barcode,
-        'quantity': p.quantity, 'costUsd': p.costUsd, 'costLocal': p.costLocal, 'costCurrency': p.costCurrency, 'pack': p.pack}});
+        'quantity': p.quantity, 'costUsd': p.costUsd, 'costLocal': p.costLocal, 'costCurrency': p.costCurrency, 'unit': p.unit, 'pack': p.pack}});
     if (products.length > 400) { throw const FormatException('الجرد الحالي يدعم حتى 400 مادة. يلزم تقسيم الجرد للمخزون الأكبر.'); }
     if (cloud) {
       await FirebaseFirestore.instance.runTransaction((tx) async {
@@ -631,7 +635,7 @@ class AppStore extends ChangeNotifier {
       'history': history.map((c) => c.toJson()).toList(), 'stocktake': stocktake?.toJson()};
   }
   Future<void> restore(Json data) async {
-    _requireOwner();
+    _require(can('restoreBackup'));
     // Cloud restore uses the regular revision-checked product path; never restores memberships.
     if (data['schema'] != 1 || data['products'] is! List || data['settings'] is! Map) {
       throw const FormatException('ملف النسخة الاحتياطية غير صالح.');
@@ -656,15 +660,19 @@ class AppStore extends ChangeNotifier {
     if (cloud) {
       var completed = 0;
       try {
-        await changeSettings(nextSettings.rate, nextSettings.margin, nextSettings.currency);
+        await _changeSettings(nextSettings.rate, nextSettings.margin, nextSettings.currency, restoring: true);
         for (final p in restored) {
           final old = findId(p.id);
-          await saveProduct(Product.fromJson(p.id, {...p.toJson(), 'revision': (old?.revision ?? 0) + 1}, p.pricingJson()), expectedRevision: old?.revision);
+          await _saveProduct(Product.fromJson(p.id, {...p.toJson(), 'revision': (old?.revision ?? 0) + 1}, p.pricingJson()), expectedRevision: old?.revision, restoring: true);
           completed++;
         }
       } catch (_) { throw FormatException('تمت استعادة $completed مادة. توقف الاسترجاع؛ راجع البيانات قبل المحاولة مجدداً.'); }
     } else {
-      _load(data); await _persist(); notifyListeners();
+      final oldSettings = settings, oldProducts = products, oldHistory = history;
+      final oldStocktake = stocktake;
+      try { _load(data); await _persist(); }
+      catch (_) { settings = oldSettings; products = oldProducts; history = oldHistory; stocktake = oldStocktake; rethrow; }
+      notifyListeners();
     }
   }
   void _load(Json j) {

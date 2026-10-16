@@ -30,22 +30,23 @@ class StoreSettings {
 }
 
 class Product {
-  final String id, name, category, barcode;
-  final int pack, revision;
+  final String id, name, category, barcode, unit;
+  final int revision;
+  final double pack;
   final double quantity, saleBaseUsd, bargainPercent;
   final double? saleBaseLocal;
   final String costCurrency;
   final double? costUsd, costLocal, margin, manualPrice;
   final bool ready;
   const Product({required this.id, required this.name, this.category = 'عام',
-    this.barcode = '', this.pack = 1, this.quantity = 0,
+    this.barcode = '', this.unit = 'piece', this.pack = 1, this.quantity = 0,
     this.saleBaseUsd = 0, this.bargainPercent = 0, this.saleBaseLocal, this.costCurrency = 'USD',
     this.costUsd, this.costLocal, this.margin, this.manualPrice,
     this.ready = false, this.revision = 0});
   factory Product.fromJson(String id, Json j, [Json? pricing]) => Product(
     id: id, name: j['name'] as String? ?? '',
     category: j['category'] as String? ?? 'عام', barcode: j['barcode'] as String? ?? '',
-    pack: (j['pack'] as num?)?.toInt() ?? 1,
+    pack: number(j['pack'], 1), unit: j['unit'] as String? ?? 'piece',
     quantity: number(j['quantity']), bargainPercent: number(j['bargainPercent']), saleBaseUsd: number(j['saleBaseUsd']),
     saleBaseLocal: j['saleBaseLocal'] == null ? null : number(j['saleBaseLocal']),
     costCurrency: j['costCurrency'] as String? ?? 'USD',
@@ -55,7 +56,7 @@ class Product {
     manualPrice: j['manualPrice'] == null ? null : number(j['manualPrice']),
     ready: j['ready'] == true, revision: (j['revision'] as num?)?.toInt() ?? 0);
   Json toJson() => {'name': name, 'category': category, 'barcode': barcode,
-    'pack': pack, 'quantity': quantity, 'bargainPercent': bargainPercent, 'saleBaseUsd': saleBaseUsd,
+    'pack': pack == pack.roundToDouble() ? pack.toInt() : pack, 'unit': unit, 'quantity': quantity, 'bargainPercent': bargainPercent, 'saleBaseUsd': saleBaseUsd,
     'saleBaseLocal': saleBaseLocal, 'costCurrency': costCurrency,
     'manualPrice': manualPrice, 'ready': ready, 'revision': revision};
   Json costJson() => {'costUsd': costUsd, 'costLocal': costLocal};
@@ -63,10 +64,14 @@ class Product {
   Json pricingJson() => {'costUsd': costUsd, 'costLocal': costLocal, 'margin': margin};
   double price(StoreSettings settings) => manualPrice ?? (costCurrency == 'SYP' ? saleBaseLocal ?? 0 : saleBaseUsd * settings.rate);
   double minimumPrice(StoreSettings settings) => minimumSalePrice(price(settings), bargainPercent);
+  bool get byWeight => unit == 'kg';
+  String get unitLabel => byWeight ? 'كغ' : 'قطعة';
+  double? get unitCost => costCurrency == 'SYP' ? costLocal : costUsd;
+  double? get packCost => unitCost == null ? null : unitCost! * pack;
   bool get hasCost => costCurrency == 'SYP' ? costLocal != null : costUsd != null;
   double? localCost(double rate) => costCurrency == 'SYP' ? costLocal : (costUsd == null ? null : costUsd! * rate);
   double effectiveMargin(StoreSettings settings) => margin ?? settings.margin;
-  Product edit({String? name, String? category, String? barcode, int? pack,
+  Product edit({String? name, String? category, String? barcode, String? unit, double? pack,
     double? quantity, double? bargainPercent, double? costUsd, double? costLocal, String? costCurrency, double? margin, double? manualPrice,
     bool useGeneralMargin = false, bool automatic = false,
     required StoreSettings settings}) {
@@ -87,7 +92,7 @@ class Product {
     final manual = automatic ? null : (manualPrice ?? this.manualPrice);
     return Product(id: id, name: name ?? this.name,
       category: category ?? this.category, barcode: barcode ?? this.barcode,
-      pack: pack ?? this.pack, quantity: quantity ?? this.quantity, bargainPercent: bargainPercent ?? this.bargainPercent,
+      pack: pack ?? this.pack, unit: unit ?? this.unit, quantity: quantity ?? this.quantity, bargainPercent: bargainPercent ?? this.bargainPercent,
       costUsd: usd, costLocal: local, costCurrency: currency, margin: profit, manualPrice: manual,
       saleBaseUsd: currency == 'USD' ? (!reprice ? saleBaseUsd : usd != null ? usd * factor : explicitMargin ? saleBaseUsd * factor / oldFactor : saleBaseUsd) : 0,
       saleBaseLocal: currency == 'SYP' ? (!reprice ? saleBaseLocal : local != null ? local * factor : explicitMargin ? (saleBaseLocal ?? 0) * factor / oldFactor : saleBaseLocal) : null,
@@ -97,7 +102,8 @@ class Product {
   void validate() {
     if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id) ||
         name.trim().isEmpty || name.length > 120 || category.length > 80 ||
-        barcode.length > 80 || !bargainPercent.isFinite || bargainPercent < 0 || bargainPercent > 100 || pack < 1 || quantity < 0 || !quantity.isFinite ||
+        barcode.length > 80 || !bargainPercent.isFinite || bargainPercent < 0 || bargainPercent > 100 || !['piece', 'kg'].contains(unit) || !pack.isFinite || pack <= 0 ||
+        (unit == 'piece' && (pack < 1 || pack != pack.roundToDouble())) || quantity < 0 || !quantity.isFinite ||
         (costUsd != null && (costUsd! < 0 || !costUsd!.isFinite)) ||
         (margin != null && (margin! < 0 || !margin!.isFinite)) ||
         (manualPrice != null && (manualPrice! < 0 || !manualPrice!.isFinite)) ||
@@ -126,12 +132,21 @@ class PriceChange {
 class CartLine {
   final String id, name;
   final double unitPrice;
-  int quantity;
+  double quantity;
+  final String unit;
+  bool get byWeight => unit == 'kg';
+  String get unitLabel => byWeight ? 'كغ' : 'قطعة';
   double _discountPercent = 0;
   double? _chosenPrice;
   double get discountPercent => _discountPercent;
   set discountPercent(double value) { _discountPercent = value; _chosenPrice = null; }
-  CartLine({required this.id, required this.name, required this.unitPrice, this.quantity = 1});
+  CartLine({required this.id, required this.name, required this.unitPrice, this.quantity = 1, this.unit = 'piece'});
+  void setQuantity(double value) {
+    if (!value.isFinite || value <= 0 || (!byWeight && value != value.roundToDouble())) {
+      throw const FormatException('أدخل وزناً موجباً أو عدداً صحيحاً موجباً للقطع.');
+    }
+    quantity = value;
+  }
   double get sellingPrice => _chosenPrice ?? unitPrice * (1 - discountPercent / 100);
   double minimumPrice(double allowedMaximum) => minimumSalePrice(unitPrice, allowedMaximum);
   double get total => sellingPrice * quantity;

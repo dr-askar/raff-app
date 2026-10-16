@@ -10,6 +10,10 @@ double? parseAmount(String value) {
   return double.tryParse(text);
 }
 
+double? parseQuantity(String value) => parseAmount(value.replaceAll(',', '.'));
+
+String quantityText(num value) => value.toStringAsFixed(6).replaceFirst(RegExp(r'\.?0+$'), '');
+
 String money(num n) => n.toStringAsFixed(n == n.roundToDouble() ? 0 : 2)
   .replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
 

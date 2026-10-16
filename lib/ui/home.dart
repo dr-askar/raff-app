@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import '../data/app_store.dart';
 import '../data/files.dart';
+import '../data/device_files.dart';
 import '../domain/models.dart';
 import 'common.dart';
 import 'scanner.dart';
@@ -36,14 +37,16 @@ class _HomeState extends State<Home> {
   List<Product> get filtered => s.products.where((p) =>
     (category == 'الكل' || p.category == category) &&
     (p.name.toLowerCase().contains(search.text.trim().toLowerCase()) || p.barcode.contains(search.text.trim()))).toList();
-  void addToCart(Product p) {
+  Future<void> addToCart(Product p) async {
     if (!s.can('useCalculator')) { return; }
     if (!p.ready) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('المادة تحتاج تسعيراً أولاً'))); return; }
+    final quantity = p.byWeight ? await numberDialog('وزن ${p.name}', 'الوزن بالكيلوغرام', initial: 1, quantity: true, positive: true) : 1.0;
+    if (quantity == null || !mounted || !s.can('useCalculator')) { return; }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       final i = cart.indexWhere((line) => line.id == p.id);
-      if (i == -1) { cart.add(CartLine(id: p.id, name: p.name, unitPrice: p.price(s.settings))); }
-      else { cart[i].quantity++; }
+      if (i == -1) { cart.add(CartLine(id: p.id, name: p.name, unitPrice: p.price(s.settings), quantity: quantity, unit: p.unit)); }
+      else if (cart[i].unit == p.unit) { cart[i].quantity += quantity; }
     });
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('أضيفت ${p.name}'), duration: const Duration(milliseconds: 900)));
   }
@@ -57,16 +60,16 @@ class _HomeState extends State<Home> {
       } else if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الباركود غير موجود في المواد'))); }
       return;
     }
-    if (basket) { addToCart(p); }
+    if (basket) { await addToCart(p); }
     else if (counting) { await count(p); }
     else { setState(() { tab = 0; category = 'الكل'; search.text = p.barcode; }); }
   }
   Future<void> count(Product p) async {
     if (!s.can('viewStocktake') || !s.can('countStock')) { return; }
-    final value = await numberDialog('جرد: ${p.name}', 'عدد القطع الفعلي', initial: s.stocktake?.counts[p.id]);
+    final value = await numberDialog('جرد: ${p.name}', 'الكمية الفعلية بـ${p.unitLabel}', initial: s.stocktake?.counts[p.id], quantity: true);
     if (value != null && mounted) { await action(() => s.countProduct(p.id, value), 'تم تسجيل العدد الفعلي'); }
   }
-  Future<double?> numberDialog(String title, String label, {double? initial}) async {
+  Future<double?> numberDialog(String title, String label, {double? initial, bool quantity = false, bool positive = false, bool whole = false}) async {
     final c = TextEditingController(text: initial?.toString() ?? '');
     String? error;
     final result = await showDialog<double>(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, change) =>
@@ -75,8 +78,8 @@ class _HomeState extends State<Home> {
         decoration: InputDecoration(labelText: label, errorText: error)), actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('رجوع')),
           FilledButton(onPressed: () {
-            final n = double.tryParse(c.text);
-            if (n == null || !n.isFinite || n < 0) { change(() => error = 'أدخل رقماً غير سالب'); }
+            final n = quantity ? parseQuantity(c.text) : parseAmount(c.text);
+            if (n == null || !n.isFinite || n < 0 || (positive && n == 0) || (whole && n != n.roundToDouble())) { change(() => error = whole ? 'أدخل عدداً صحيحاً موجباً' : positive ? 'أدخل كمية موجبة' : 'أدخل رقماً غير سالب'); }
             else { Navigator.pop(ctx, n); }
           }, child: const Text('حفظ')),
         ])));
@@ -155,7 +158,7 @@ class _HomeState extends State<Home> {
               if (!selected.add(p.id)) { selected.remove(p.id); }
             })) : const Icon(Icons.inventory_2_outlined),
             title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Padding(padding: const EdgeInsets.only(top: 6), child: Text('${p.category} • ${money(p.quantity)} قطعة • الكرتونة ${p.pack}\n${p.manualPrice == null ? 'سعر تلقائي' : 'سعر ثابت'}${s.can('viewCost') && p.hasCost ? ' • تكلفة القطعة ${money(p.costCurrency == 'SYP' ? p.costLocal! : p.costUsd!)} ${p.costCurrency == 'SYP' ? 'ل.س' : '\$'}' : ''}${p.ready ? '\nأقل سعر مسموح: ${money(minimumFor(p))} ${s.settings.currency}' : ''}')),
+            subtitle: Padding(padding: const EdgeInsets.only(top: 6), child: Text('${p.category} • ${quantityText(p.quantity)} ${p.unitLabel} • الطرد ${quantityText(p.pack)} ${p.unitLabel}\n${p.manualPrice == null ? 'سعر تلقائي' : 'سعر ثابت'}${s.can('viewCost') && p.hasCost ? ' • تكلفة ${p.unitLabel} ${money(p.costCurrency == 'SYP' ? p.costLocal! : p.costUsd!)} ${p.costCurrency == 'SYP' ? 'ل.س' : '\$'}' : ''}${p.ready ? '\nأقل سعر مسموح: ${money(minimumFor(p))} ${s.settings.currency}' : ''}')),
             isThreeLine: true,
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               Text(p.ready ? '${money(p.price(s.settings))}\n${s.settings.currency}' : 'يحتاج\nتسعيراً', textAlign: TextAlign.center,
@@ -184,14 +187,14 @@ class _HomeState extends State<Home> {
       ListenableBuilder(listenable: s, builder: (ctx, _) => StatefulBuilder(builder: (ctx, change) {
         final product = s.findId(line.id);
         final limit = s.can('applyBargain') ? product?.bargainPercent ?? 0 : 0.0;
-        return AlertDialog(title: const Text('تحديد سعر القطعة'), scrollable: true,
+        return AlertDialog(title: Text(line.byWeight ? 'تحديد سعر الكيلوغرام' : 'تحديد سعر القطعة'), scrollable: true,
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(line.name), const SizedBox(height: 8),
             Text('سعر المبيع: ${money(line.unitPrice)} ${s.settings.currency}'),
             Text('أقل سعر مسموح: ${money(line.minimumPrice(limit))} ${s.settings.currency}', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 16), TextField(key: const ValueKey('bargain-price'), controller: controller, autofocus: true,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(labelText: 'السعر المتفق عليه للقطعة', errorText: error)),
+              decoration: InputDecoration(labelText: line.byWeight ? 'السعر المتفق عليه للكيلوغرام' : 'السعر المتفق عليه للقطعة', errorText: error)),
           ]), actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('رجوع')),
             FilledButton(onPressed: () {
@@ -210,7 +213,7 @@ class _HomeState extends State<Home> {
     ListenableBuilder(listenable: s, builder: (ctx, _) {
       final p = s.findId(product.id);
       return AlertDialog(title: Text(p?.name ?? 'الصنف محذوف'),
-        content: p == null ? null : Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${p.pack} قطعة\nالمتوفر: ${money(p.quantity)} قطعة\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}${s.can('viewCost') && p.hasCost ? '\nتكلفة القطعة: ${money(p.localCost(s.settings.rate)!)} ل.س' : ''}${s.can('viewMargin') ? '\nنسبة الربح: ${money(p.effectiveMargin(s.settings))}%' : ''}${p.ready ? '\nأقل سعر مسموح: ${money(minimumFor(p))} ${s.settings.currency}' : ''}'),
+        content: p == null ? null : Text('الباركود: ${p.barcode.isEmpty ? 'غير محدد' : p.barcode}\nالتعبئة: ${quantityText(p.pack)} ${p.unitLabel}\nالمتوفر: ${quantityText(p.quantity)} ${p.unitLabel}\nالسعر: ${p.ready ? money(p.price(s.settings)) : 'يحتاج تسعيراً'} ${s.settings.currency}${s.can('viewCost') && p.hasCost ? '\nتكلفة ${p.unitLabel}: ${money(p.localCost(s.settings.rate)!)} ل.س' : ''}${s.can('viewMargin') ? '\nنسبة الربح: ${money(p.effectiveMargin(s.settings))}%' : ''}${p.ready ? '\nأقل سعر مسموح: ${money(minimumFor(p))} ${s.settings.currency}' : ''}'),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))]);
     }));
 
@@ -246,11 +249,13 @@ class _HomeState extends State<Home> {
           Align(alignment: AlignmentDirectional.centerStart, child: Text('أقل سعر مسموح: ${money(line.minimumPrice(s.can('applyBargain') ? s.findId(line.id)?.bargainPercent ?? 0 : 0))} ${s.settings.currency}')),
           if (s.can('applyBargain') && (s.findId(line.id)?.bargainPercent ?? 0) > 0) Align(alignment: AlignmentDirectional.centerStart,
             child: TextButton.icon(onPressed: busy ? null : () => bargain(line), icon: const Icon(Icons.price_change_outlined), label: const Text('اختيار سعر للزبون'))),
-          Row(children: [Expanded(child: Text('${money(line.sellingPrice)} للقطعة${line.discountPercent > 0 ? ' • مراعاة ${money(line.unitPrice - line.sellingPrice)} ${s.settings.currency}' : ''}')), IconButton(tooltip: 'إنقاص', onPressed: () => setState(() {
-            if (line.quantity > 1) { line.quantity--; } else { cart.removeAt(i); }
+          Row(children: [Expanded(child: Text('${money(line.sellingPrice)} ${line.byWeight ? 'للكيلوغرام' : 'للقطعة'}${line.discountPercent > 0 ? ' • مراعاة ${money(line.unitPrice - line.sellingPrice)} ${s.settings.currency}' : ''}')), IconButton(tooltip: 'إنقاص', onPressed: () => setState(() {
+            final step = line.byWeight ? 0.1 : 1.0;
+            if (line.quantity > step) { line.setQuantity(double.parse((line.quantity - step).toStringAsFixed(6))); } else { cart.removeAt(i); }
           }), icon: const Icon(Icons.remove_circle_outline)),
-            Text('${line.quantity}', style: const TextStyle(fontSize: 18)),
-            IconButton(tooltip: 'زيادة', onPressed: () => setState(() => line.quantity++), icon: const Icon(Icons.add_circle_outline)),
+            TextButton(onPressed: busy ? null : () => editCartQuantity(line),
+              child: Text('${quantityText(line.quantity)} ${line.unitLabel}', style: const TextStyle(fontSize: 18))),
+            IconButton(tooltip: 'زيادة', onPressed: () => setState(() => line.setQuantity(double.parse((line.quantity + (line.byWeight ? 0.1 : 1)).toStringAsFixed(6)))), icon: const Icon(Icons.add_circle_outline)),
             IconButton(tooltip: 'حذف', onPressed: () => setState(() => cart.removeAt(i)), icon: const Icon(Icons.delete_outline)),
           ]),
         ])));
@@ -268,7 +273,7 @@ class _HomeState extends State<Home> {
             setState(() {
               for (var i = 0; i < cart.length; i++) {
                 final p = s.findId(cart[i].id);
-                if (p != null && p.ready) { cart[i] = CartLine(id: p.id, name: p.name, unitPrice: p.price(s.settings), quantity: cart[i].quantity); }
+                if (p != null && p.ready) { cart[i] = CartLine(id: p.id, name: p.name, unitPrice: p.price(s.settings), quantity: cart[i].quantity, unit: p.unit); }
               }
             });
           }
@@ -291,8 +296,8 @@ class _HomeState extends State<Home> {
         searchBar(counting: true),
         Expanded(child: ListView.builder(padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.viewInsetsOf(context).bottom), itemCount: rows.length, itemBuilder: (context, i) {
           final p = rows[i]; final actual = stock.counts[p.id];
-          return Card(child: ListTile(title: Text(p.name), subtitle: Text('المسجل: ${money(p.quantity)} قطعة${actual == null ? '' : ' • الفرق: ${money(actual - p.quantity)}'}'),
-            trailing: Text(actual == null ? 'لم يُعدّ' : '${money(actual)} قطعة', style: TextStyle(color: actual == null ? Colors.blueGrey : const Color(0xff237b66), fontWeight: FontWeight.bold)),
+          return Card(child: ListTile(title: Text(p.name), subtitle: Text('المسجل: ${quantityText(p.quantity)} ${p.unitLabel}${actual == null ? '' : ' • الفرق: ${quantityText(actual - p.quantity)}'}'),
+            trailing: Text(actual == null ? 'لم يُعدّ' : '${quantityText(actual)} ${p.unitLabel}', style: TextStyle(color: actual == null ? Colors.blueGrey : const Color(0xff237b66), fontWeight: FontWeight.bold)),
             onTap: busy || stock.closed || !s.can('countStock') ? null : () => count(p)));
         })),
         if (s.can('viewCost')) Container(padding: const EdgeInsets.all(16), color: const Color(0xffe3eef9), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -344,7 +349,24 @@ class _HomeState extends State<Home> {
         ListTile(leading: const Icon(Icons.download_outlined), title: const Text('تصدير المواد إلى Excel'), onTap: busy ? null : () => action(() => StoreFiles.shareBytes(StoreFiles.productExcel(s.products, s.settings), 'raff-products.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'ملف المواد جاهز للمشاركة')),
         ListTile(leading: const Icon(Icons.upload_file_outlined), title: const Text('استيراد Excel'), subtitle: const Text('معاينة قبل الحفظ • الحقول الفارغة لا تمسح القيم'), onTap: busy ? null : importExcel),
         ListTile(leading: const Icon(Icons.backup_outlined), title: const Text('تنزيل نسخة احتياطية'), subtitle: const Text('مواد وإعدادات وآخر سجل أسعار والجرد الحالي'), onTap: busy ? null : () => action(() => StoreFiles.shareJson(s.backup()), 'النسخة جاهزة. احفظها في مكان آمن')),
-        ListTile(leading: const Icon(Icons.restore), title: const Text('استرجاع نسخة احتياطية'), subtitle: Text(s.cloud ? 'دمج المواد والإعدادات؛ دون حذف المواد الأخرى أو تغيير المستخدمين' : 'استبدال البيانات التجريبية المحلية'), onTap: busy ? null : restore),
+      ])),
+    ],
+    if (s.can('restoreBackup')) Card(child: ListTile(leading: const Icon(Icons.restore),
+      title: const Text('استرجاع نسخة احتياطية'), subtitle: const Text('استرجاع المواد والأسعار والإعدادات • القفل والصلاحيات لا تتغير'),
+      onTap: busy ? null : () => restore())),
+    if (s.owner || s.can('restoreBackup')) ...[
+      const SizedBox(height: 12), const Text('Google Drive', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      Card(child: Column(children: [
+        if (s.owner) ...[
+          ListTile(leading: const Icon(Icons.cloud_upload_outlined), title: const Text('حفظ الأصناف Excel على Drive'),
+            onTap: busy ? null : () => saveDrive(backup: false)),
+          ListTile(leading: const Icon(Icons.cloud_download_outlined), title: const Text('استيراد Excel من Drive'),
+            onTap: busy ? null : () => importExcel(fromDrive: true)),
+          ListTile(leading: const Icon(Icons.backup_outlined), title: const Text('حفظ نسخة JSON على Drive'),
+            onTap: busy ? null : () => saveDrive(backup: true)),
+        ],
+        if (s.can('restoreBackup')) ListTile(leading: const Icon(Icons.restore_page_outlined), title: const Text('استرجاع نسخة JSON من Drive'),
+          onTap: busy ? null : () => restore(fromDrive: true)),
       ])),
     ],
     if (s.can('viewHistory')) ...[
@@ -356,7 +378,7 @@ class _HomeState extends State<Home> {
         trailing: Text('${money(h.before)}\n↓ ${money(h.after)}')))),
     ],
     if (!s.owner) const Padding(padding: EdgeInsets.all(24), child: Text('الميزات المتاحة تحددها صلاحياتك. اطلب من صاحب المحل تغييرها عند الحاجة.')),
-    const SizedBox(height: 24), const Center(child: Text('رفّ • نسخة أولية 0.3.0', style: TextStyle(color: Colors.blueGrey))),
+    const SizedBox(height: 24), const Center(child: Text('رفّ • 0.4.0', style: TextStyle(color: Colors.blueGrey))),
   ]);
 
   Future<void> currencyDialog() async {
@@ -367,7 +389,8 @@ class _HomeState extends State<Home> {
     Future<void>.delayed(const Duration(milliseconds: 300), c.dispose);
     if (value != null && mounted) { await action(() => s.changeSettings(s.settings.rate, s.settings.margin, value)); }
   }
-  Future<void> importExcel() async {
+  Future<void> importExcel({bool fromDrive = false}) async {
+    if (fromDrive && !await driveGuide(saving: false)) { return; }
     await action(() async {
       final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx'], withData: true);
       if (picked == null || !mounted) { return; }
@@ -405,12 +428,37 @@ class _HomeState extends State<Home> {
       ));
     }, 'انتهت مراجعة الاستيراد');
   }
-  Future<void> restore() => action(() async {
+  Future<void> restore({bool fromDrive = false}) async {
+    if (!s.can('restoreBackup')) { return; }
+    if (fromDrive && !await driveGuide(saving: false)) { return; }
+    await action(() async {
     final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json'], withData: true);
     if (picked == null || !mounted) { return; }
     if (picked.files.single.size > 10 * 1024 * 1024) { throw const FormatException('ملف النسخة أكبر من الحد المسموح.'); }
     final data = Json.from(jsonDecode(utf8.decode(picked.files.single.bytes!)));
     if (await confirm(context, 'استرجاع النسخة', s.cloud ? 'دمج مواد النسخة وتحديث إعدادات المحل. لن تُحذف المواد الأخرى. الاستعادة لا تشمل الجرد والسجل القديم في الوضع السحابي.' : 'سيتم استبدال بيانات هذا الجهاز بالنسخة. احفظ نسخة حالية قبل المتابعة.')) { await s.restore(data); }
   }, 'تم استرجاع النسخة');
+  }
+
+  Future<void> editCartQuantity(CartLine line) async {
+    final value = await numberDialog('كمية ${line.name}', line.byWeight ? 'الوزن بالكيلوغرام' : 'عدد القطع',
+      initial: line.quantity, quantity: true, positive: true, whole: !line.byWeight);
+    if (value != null && mounted && s.can('useCalculator')) { setState(() => line.setQuantity(value)); }
+  }
+  Future<bool> driveGuide({required bool saving}) => confirm(context, 'Google Drive',
+    'ستفتح نافذة ملفات أندرويد. افتح قائمة المواقع واختر Google Drive، ثم ${saving ? 'المجلد واضغط حفظ' : 'الملف المطلوب'}. يجب أن يكون تطبيق Drive مثبتاً وحسابك مفتوحاً. يمكنك اختيار تخزين الهاتف أيضاً.');
+  Future<void> saveDrive({required bool backup}) async {
+    if (!s.owner || busy || !await driveGuide(saving: true) || !mounted) { return; }
+    setState(() => busy = true);
+    try {
+      final bytes = backup ? utf8.encode(const JsonEncoder.withIndent('  ').convert(s.backup())) : StoreFiles.productExcel(s.products, s.settings);
+      final name = backup ? 'raff-backup-${DateTime.now().millisecondsSinceEpoch}.json' : 'raff-products.xlsx';
+      final saved = await DeviceFiles.save(bytes, name);
+      if (saved && mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حفظ الملف في المكان الذي اخترته'))); }
+    } catch (e) {
+      if (mounted) { await perform(context, () async { throw e; }); }
+    } finally { if (mounted) { setState(() => busy = false); } }
+  }
 }
+
 

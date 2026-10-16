@@ -172,3 +172,25 @@ test('owner alone sets per-item bargaining limits', async () => {
   const db = env.authenticatedContext('worker').firestore();
   await assertFails(updateDoc(doc(db, path('products/p')), { bargainPercent: 10, revision: 3, updatedBy: 'worker', updatedAt: serverTimestamp() }));
 });
+
+
+test('owner stores weighted packs and fractional quantities; ordinary worker cannot change units', async () => {
+  const owner = env.authenticatedContext('owner').firestore();
+  await assertSucceeds(updateDoc(doc(owner, path('products/p')), { unit: 'kg', pack: 12.5, quantity: 0.125, revision: 2 }));
+  const worker = env.authenticatedContext('worker').firestore();
+  await assertFails(updateDoc(doc(worker, path('products/p')), { unit: 'piece', pack: 12, revision: 3 }));
+  await assertFails(updateDoc(doc(owner, path('products/p')), { unit: 'piece', pack: 0.5, revision: 3 }));
+});
+test('restore permission grants restoration writes without cost visibility or membership changes', async () => {
+  await env.withSecurityRulesDisabled(context => updateDoc(doc(context.firestore(), path('members/worker')), { permissions: { restoreBackup: true } }));
+  const db = env.authenticatedContext('worker').firestore();
+  await assertSucceeds(updateDoc(doc(db, path('products/p')), { unit: 'kg', pack: 0.5, quantity: 0.125, revision: 2, updatedBy: 'worker', updatedAt: serverTimestamp() }));
+  await assertSucceeds(setDoc(doc(db, path('costs/p')), { costUsd: 2, costLocal: null }));
+  await assertSucceeds(setDoc(doc(db, path('margins/p')), { margin: 15 }));
+  await assertSucceeds(updateDoc(doc(db, path('settings/current')), { rate: 15000, margin: 15, revision: 1 }));
+  await assertFails(getDoc(doc(db, path('costs/p'))));
+  await assertFails(getDoc(doc(db, path('margins/p'))));
+  await assertFails(updateDoc(doc(db, path('members/worker')), { role: 'owner' }));
+  await env.withSecurityRulesDisabled(context => updateDoc(doc(context.firestore(), path('members/worker')), { permissions: {} }));
+  await assertFails(setDoc(doc(db, path('costs/p')), { costUsd: 3, costLocal: null }));
+});

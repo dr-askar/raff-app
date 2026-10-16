@@ -28,12 +28,12 @@ class StoreFiles {
     final sheet = book['Products'];
     book.delete('Sheet1');
     sheet.appendRow(['id', 'name', 'barcode', 'category', 'pack', 'quantity', 'cost_usd',
-      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent'].map(TextCellValue.new).toList());
+      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent', 'unit', 'cost_per_pack'].map(TextCellValue.new).toList());
     for (final p in products) {
       sheet.appendRow([TextCellValue(p.id), TextCellValue(p.name), TextCellValue(p.barcode), TextCellValue(p.category),
-        IntCellValue(p.pack), DoubleCellValue(p.quantity), p.costUsd == null ? null : DoubleCellValue(p.costUsd!),
+        p.pack == p.pack.roundToDouble() ? IntCellValue(p.pack.toInt()) : DoubleCellValue(p.pack), DoubleCellValue(p.quantity), p.costUsd == null ? null : DoubleCellValue(p.costUsd!),
         p.margin == null ? null : DoubleCellValue(p.margin!), p.manualPrice == null ? null : DoubleCellValue(p.manualPrice!),
-        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent)]);
+        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent), TextCellValue(p.unit), p.packCost == null ? null : DoubleCellValue(p.packCost!)]);
     }
     return book.encode()!;
   }
@@ -41,14 +41,14 @@ class StoreFiles {
     final book = Excel.createExcel(); final sheet = book['الجرد']; book.delete('Sheet1');
     sheet.appendRow([TextCellValue('جلسة الجرد'), TextCellValue(s.at)]);
     sheet.appendRow([TextCellValue('سعر الصرف المثبت'), DoubleCellValue(s.rate), TextCellValue(s.currency)]);
-    sheet.appendRow(['المادة', 'الباركود', 'العدد المسجل', 'العدد الفعلي', 'الفرق', 'تكلفة القطعة محلياً', 'القيمة'].map(TextCellValue.new).toList());
+    sheet.appendRow(['المادة', 'الباركود', 'العدد المسجل', 'العدد الفعلي', 'الفرق', 'تكلفة الوحدة محلياً', 'القيمة', 'الوحدة'].map(TextCellValue.new).toList());
     for (final row in s.snapshot.entries) {
       final j = row.value; final count = s.counts[row.key];
       final cost = j['costUsd'] == null && j['costLocal'] == null ? null : snapshotCost(j, s.rate);
       sheet.appendRow([TextCellValue(j['name'] ?? ''), TextCellValue(j['barcode'] ?? ''),
         DoubleCellValue(number(j['quantity'])), count == null ? null : DoubleCellValue(count),
         count == null ? null : DoubleCellValue(count - number(j['quantity'])),
-        cost == null ? null : DoubleCellValue(cost), count == null || cost == null ? null : DoubleCellValue(count * cost)]);
+        cost == null ? null : DoubleCellValue(cost), count == null || cost == null ? null : DoubleCellValue(count * cost), TextCellValue(j['unit'] == 'kg' ? 'كغ' : 'قطعة')]);
     }
     sheet.appendRow([TextCellValue('إجمالي المواد المعدودة ذات التكلفة المعروفة'), null, null, null, null, null, DoubleCellValue(s.value)]);
     return book.encode()!;
@@ -67,6 +67,7 @@ class StoreFiles {
       'باركود': 'barcode', 'رقم الباركود': 'barcode', 'الفئة': 'category',
       'التعبئة': 'pack', 'الكمية': 'quantity', 'التكلفة': 'cost_usd',
       'تكلفة بالسوري': 'cost_syp', 'رأس المال بالسوري': 'cost_syp', 'عملة التكلفة': 'cost_currency',
+      'وحدة البيع': 'unit', 'الوحدة': 'unit', 'سعر الطرد': 'cost_per_pack', 'تكلفة الطرد': 'cost_per_pack',
       'نسبة المساومة': 'bargain_percent', 'نسبة الربح': 'margin_percent', 'سعر ثابت': 'manual_price',
     };
     final planned = <Product>[], warnings = <String>[];
@@ -132,19 +133,33 @@ class StoreFiles {
           if (parsed == null || !parsed.isFinite || parsed < 0) { throw FormatException('قيمة غير صالحة في $key'); }
           return parsed;
         }
+        var unit = field('unit') ?? old?.unit ?? 'piece';
+        unit = {'كغ': 'kg', 'كيلو': 'kg', 'كيلوغرام': 'kg', 'قطعة': 'piece', 'عدد': 'piece'}[unit] ?? unit.toLowerCase();
         final pack = numeric('pack');
-        if (pack != null && (pack < 1 || pack != pack.roundToDouble())) { throw const FormatException('عدد التعبئة يجب أن يكون عدداً صحيحاً موجباً'); }
-        final usd = numeric('cost_usd'), local = numeric('cost_syp');
+        final units = pack ?? old?.pack ?? 1.0;
+        if (!['kg', 'piece'].contains(unit) || units <= 0 || (unit == 'piece' && (units < 1 || units != units.roundToDouble()))) {
+          throw const FormatException('تحقق من وحدة البيع ومحتوى الطرد الموجب');
+        }
+        var usd = numeric('cost_usd'), local = numeric('cost_syp');
         if (usd != null && local != null) { throw const FormatException('أدخل التكلفة بالدولار أو بالسوري في الصف، لا الاثنين معاً'); }
         var currency = field('cost_currency')?.toUpperCase();
         if (currency == 'سوري' || currency == 'ل.س') { currency = 'SYP'; }
         if (currency == 'دولار' || currency == '\$') { currency = 'USD'; }
         currency ??= local != null ? 'SYP' : usd != null ? 'USD' : old?.costCurrency ?? 'USD';
         if (!['USD', 'SYP'].contains(currency) || (currency == 'USD' && local != null) || (currency == 'SYP' && usd != null)) { throw const FormatException('عملة التكلفة لا تتوافق مع عمود التكلفة'); }
+        final bundle = numeric('cost_per_pack');
+        if (bundle != null) {
+          final single = bundle / units;
+          final supplied = currency == 'SYP' ? local : usd;
+          if (supplied != null && (supplied - single).abs() > 0.00000001 * (1 + supplied.abs())) {
+            throw const FormatException('تكلفة الطرد لا تتطابق مع تكلفة الوحدة ومحتوى الطرد');
+          }
+          if (currency == 'SYP') { local = single; } else { usd = single; }
+        }
         final base = old ?? Product(id: importedId ?? newId(), name: name!);
         if (old == null && byId.containsKey(base.id)) { throw const FormatException('معرف مكرر؛ أعد معاينة الملف'); }
         final p = base.edit(name: name, barcode: barcode, category: field('category'),
-          pack: pack?.toInt(), quantity: numeric('quantity'), costUsd: usd, costLocal: local, costCurrency: currency,
+          pack: pack, unit: unit, quantity: numeric('quantity'), costUsd: usd, costLocal: local, costCurrency: currency,
           bargainPercent: numeric('bargain_percent'), margin: numeric('margin_percent'), manualPrice: numeric('manual_price'), settings: settings);
         p.validate();
         planned.add(p); plannedIds.add(p.id);

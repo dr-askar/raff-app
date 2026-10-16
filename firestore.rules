@@ -31,7 +31,7 @@ service cloud.firestore {
       let p = m.get('permissions', {});
       return signedIn() && m.active == true && (m.role == 'owner' || (m.role == 'worker' &&
         (p.get('addProduct', false) || p.get('deleteProduct', false) || p.get('editDetails', false) ||
-         p.get('editQuantity', false) || p.get('editSalePrice', false) || p.get('editMargin', false) ||
+         p.get('editQuantity', false) || p.get('editSalePrice', false) || p.get('editMargin', false) || p.get('restoreBackup', false) ||
          (p.get('editCost', false) && p.get('viewCost', false)) || p.get('editExchangeRate', false))));
     }
     function workerCreateProduct(store) {
@@ -53,7 +53,7 @@ service cloud.firestore {
       let profit = p.get('editMargin', false) && p.get('viewMargin', false);
       return d.updatedBy == request.auth.uid && d.updatedAt == request.time &&
         d.get('bargainPercent', 0) == resource.data.get('bargainPercent', 0) &&
-        (p.get('editDetails', false) || !changed.hasAny(['name', 'category', 'barcode', 'pack'])) &&
+        (p.get('editDetails', false) || !changed.hasAny(['name', 'category', 'barcode', 'pack', 'unit'])) &&
         (p.get('editQuantity', false) || !changed.hasAny(['quantity'])) &&
         (p.get('editSalePrice', false) || !changed.hasAny(['manualPrice'])) &&
         (cost || d.get('costCurrency', 'USD') == resource.data.get('costCurrency', 'USD')) &&
@@ -63,7 +63,7 @@ service cloud.firestore {
         (p.get('editDetails', false) || p.get('editQuantity', false) || p.get('editSalePrice', false) || p.get('editMargin', false) || cost);
     }
     function validPermissions(p) {
-      return p is map && p.keys().hasOnly(['viewCost', 'editExchangeRate', 'addProduct', 'deleteProduct', 'editDetails', 'editQuantity', 'editSalePrice', 'editCost', 'useCalculator', 'viewStocktake', 'countStock', 'viewHistory', 'viewMargin', 'editMargin', 'applyBargain']) &&
+      return p is map && p.keys().hasOnly(['viewCost', 'editExchangeRate', 'addProduct', 'deleteProduct', 'editDetails', 'editQuantity', 'editSalePrice', 'editCost', 'useCalculator', 'viewStocktake', 'countStock', 'viewHistory', 'viewMargin', 'editMargin', 'applyBargain', 'restoreBackup']) &&
         p.get('viewCost', false) is bool &&
         p.get('editExchangeRate', false) is bool &&
         p.get('addProduct', false) is bool &&
@@ -76,7 +76,7 @@ service cloud.firestore {
         p.get('viewStocktake', false) is bool &&
         p.get('countStock', false) is bool &&
         p.get('viewHistory', false) is bool &&
-        p.get('viewMargin', false) is bool && p.get('editMargin', false) is bool && p.get('applyBargain', false) is bool &&
+        p.get('viewMargin', false) is bool && p.get('editMargin', false) is bool && p.get('applyBargain', false) is bool && p.get('restoreBackup', false) is bool &&
         (!p.get('editMargin', false) || p.get('viewMargin', false)) &&
         (!p.get('editCost', false) || p.get('viewCost', false)) &&
         (!p.get('countStock', false) || p.get('viewStocktake', false));
@@ -89,13 +89,15 @@ service cloud.firestore {
     function validProduct() {
       let d = request.resource.data;
       return d.keys().hasAll(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision']) &&
-        d.keys().hasOnly(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision', 'updatedBy', 'updatedAt', 'costCurrency', 'saleBaseLocal', 'bargainPercent']) &&
+        d.keys().hasOnly(['name', 'category', 'barcode', 'pack', 'quantity', 'saleBaseUsd', 'manualPrice', 'ready', 'revision', 'updatedBy', 'updatedAt', 'costCurrency', 'saleBaseLocal', 'bargainPercent', 'unit']) &&
         d.name is string && d.name.size() > 0 && d.name.size() <= 120 &&
         d.category is string && d.category.size() <= 80 && d.barcode is string && d.barcode.size() <= 80 &&
         d.get('costCurrency', 'USD') in ['USD', 'SYP'] &&
         (d.get('saleBaseLocal', null) == null || nonnegative(d.saleBaseLocal)) &&
         nonnegative(d.get('bargainPercent', 0)) && d.get('bargainPercent', 0) <= 100 &&
-        d.pack is int && d.pack >= 1 && d.pack <= 100000 &&
+        d.get('unit', 'piece') in ['piece', 'kg'] &&
+        d.pack is number && d.pack > 0 && d.pack <= 100000 &&
+        (d.get('unit', 'piece') == 'kg' || (d.pack is int && d.pack >= 1)) &&
         nonnegative(d.quantity) && nonnegative(d.saleBaseUsd) &&
         (d.manualPrice == null || nonnegative(d.manualPrice)) && d.ready is bool && d.revision is int;
     }
@@ -114,7 +116,7 @@ service cloud.firestore {
       }
       match /settings/current {
         allow read: if member(store);
-        allow create, update: if (owner(store) || (can(store, 'editExchangeRate') && resource != null &&
+        allow create, update: if (owner(store) || (can(store, 'restoreBackup') && resource != null && request.resource.data.revision == resource.data.revision + 1) || (can(store, 'editExchangeRate') && resource != null &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rate', 'revision']) &&
           request.resource.data.revision == resource.data.revision + 1)) &&
           request.resource.data.keys().hasOnly(['rate', 'margin', 'currency', 'revision']) &&
@@ -126,14 +128,14 @@ service cloud.firestore {
       match /products/{product} {
         allow read: if member(store);
         allow create: if member(store) && validProduct() && request.resource.data.revision >= 1 &&
-          (owner(store) || workerCreateProduct(store));
+          (owner(store) || (can(store, 'restoreBackup') && request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time) || workerCreateProduct(store));
         allow update: if member(store) && validProduct() && request.resource.data.revision == resource.data.revision + 1 &&
-          (owner(store) || workerUpdateProduct(store));
+          (owner(store) || (can(store, 'restoreBackup') && request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time) || workerUpdateProduct(store));
         allow delete: if can(store, 'deleteProduct') && deletable(store, product);
       }
       match /costs/{product} {
         allow read: if can(store, 'viewCost');
-        allow create, update: if costEditor(store) &&
+        allow create, update: if (costEditor(store) || can(store, 'restoreBackup')) &&
           request.resource.data.keys().hasOnly(['costUsd', 'costLocal']) &&
           (request.resource.data.costUsd == null || nonnegative(request.resource.data.costUsd)) &&
           (request.resource.data.get('costLocal', null) == null || nonnegative(request.resource.data.costLocal)) &&
@@ -145,7 +147,7 @@ service cloud.firestore {
       }
       match /margins/{product} {
         allow read: if can(store, 'viewMargin');
-        allow create, update: if can(store, 'editMargin') && can(store, 'viewMargin') &&
+        allow create, update: if ((can(store, 'editMargin') && can(store, 'viewMargin')) || can(store, 'restoreBackup')) &&
           request.resource.data.keys().hasOnly(['margin']) &&
           (request.resource.data.margin == null || nonnegative(request.resource.data.margin)) &&
           existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(product));
@@ -156,13 +158,13 @@ service cloud.firestore {
         allow read, delete: if owner(store);
       }
       match /barcodes/{code} {
-        allow read: if can(store, 'addProduct') || can(store, 'editDetails') || can(store, 'deleteProduct');
-        allow create, update: if (can(store, 'addProduct') || can(store, 'editDetails')) &&
+        allow read: if can(store, 'addProduct') || can(store, 'editDetails') || can(store, 'deleteProduct') || can(store, 'restoreBackup');
+        allow create, update: if (can(store, 'addProduct') || can(store, 'editDetails') || can(store, 'restoreBackup')) &&
           request.resource.data.keys().hasOnly(['productId']) && request.resource.data.productId is string &&
           existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(request.resource.data.productId)) &&
           getAfter(/databases/$(database)/documents/stores/$(store)/products/$(request.resource.data.productId)).data.barcode != '' &&
           (resource == null || resource.data.productId == request.resource.data.productId);
-        allow delete: if (can(store, 'deleteProduct') || can(store, 'editDetails')) &&
+        allow delete: if (can(store, 'deleteProduct') || can(store, 'editDetails') || can(store, 'restoreBackup')) &&
           (resource == null || !existsAfter(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)) ||
            getAfter(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)).data.barcode !=
            get(/databases/$(database)/documents/stores/$(store)/products/$(resource.data.productId)).data.barcode);
@@ -212,3 +214,4 @@ service cloud.firestore {
     match /{document=**} { allow read, write: if false; }
   }
 }
+
