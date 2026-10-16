@@ -1,5 +1,20 @@
 # Raff project instructions
 
+## Product entry conventions (0.4.1)
+
+- The visible types are «طرد» and «وزن», defaulting to «طرد». The stored values
+  remain `piece` and `kg` for compatibility. A pack-type barcode adds one piece
+  to the basket; its per-piece cost is derived from the pack cost and count.
+- Cost entry uses total pack cost in USD or SYP and positive pack content.
+  Weighted products divide by kilograms; SYP costs do not follow the USD rate.
+- An explicitly present, blank Excel type cell means pack. A legacy workbook
+  without the type column preserves existing product types; new products default
+  to pack. Keep Arabic types and legacy `piece/kg` import compatibility.
+- Worker backup restoration is an independent, default-denied permission; it
+  must not grant cost visibility, exporting, password changes or role changes.
+- Keep the exchange summary compact so the materials list has more room.
+  See [docs/FEATURES_0.4.1.md](docs/FEATURES_0.4.1.md) for examples and validation.
+
 ## Android installation incident — OPEN (2026-10-16)
 
 Read [docs/ANDROID_INSTALLATION.md](docs/ANDROID_INSTALLATION.md) before changing
