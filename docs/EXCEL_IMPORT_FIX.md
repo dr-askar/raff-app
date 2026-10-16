@@ -9,4 +9,13 @@ https://github.com/dr-askar/raff-app/actions/runs/38896170706
 
 The supplied private workbook was also rewritten locally as a compatible XLSX; all 113 product rows and every cell value were compared against the original with openpyxl. The local file is a workaround for installed APKs; phone installation/import still needs user verification.
 
-This commit changes source only. Previously published 0.3.2 APK assets have not been rebuilt or replaced. Android release signing still needs permanent secure configuration before reliable in-place updates; avoid deleting an installed app to obtain this import fix. Use the compatible workbook on the existing app.
+The fix is now included in the published 0.3.3 APK:
+https://github.com/dr-askar/raff-app/releases/download/demo-47/raff-0.3.3-universal.apk
+
+Build and 56 Flutter tests, 15 rules tests, and modern Android install checks:
+https://github.com/dr-askar/raff-app/actions/runs/38896951517
+
+Android 7 verification and publication of the exact same APK:
+https://github.com/dr-askar/raff-app/actions/runs/38898047613
+
+SHA-256: 12eee22df56fc4d22e6f95d204436f699a717655bdc80359737cb9c95290d549. Android release signing remains experimental and differs from earlier APKs; export and verify a backup outside the app before any removal of an installation with data. Never put private signing keys in a public repository or cache.
