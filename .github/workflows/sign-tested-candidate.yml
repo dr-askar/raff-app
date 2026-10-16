@@ -53,8 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           RAFF_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-          "$RAFF_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/raff-sign/release.p12" --ks-key-alias raff-release --ks-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --key-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out apk/raff-0.4.1.apk source/app-release.apk
-          "$RAFF_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/raff-sign/release.p12" --ks-key-alias raff-release --ks-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --key-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out apk/baseline-test-0.4.0.apk base/raff-0.4.0-universal.apk
+          "$RAFF_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/raff-sign/release.p12" --ks-key-alias raff-release --ks-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out apk/raff-0.4.1.apk source/app-release.apk
+          "$RAFF_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/raff-sign/release.p12" --ks-key-alias raff-release --ks-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out apk/baseline-test-0.4.0.apk base/raff-0.4.0-universal.apk
           "$RAFF_TOOLS/apksigner" verify --verbose --print-certs apk/raff-0.4.1.apk | tee "$RUNNER_TEMP/candidate-cert.txt"
           RAFF_ANDROID_CERT_SHA256=$(cat config/android-release-cert.sha256) python3 scripts/release_signing.py verify "$RUNNER_TEMP/candidate-cert.txt"
           "$RAFF_TOOLS/apksigner" verify --verbose --print-certs apk/baseline-test-0.4.0.apk | tee "$RUNNER_TEMP/base-cert.txt"
