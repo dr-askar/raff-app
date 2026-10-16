@@ -20,15 +20,25 @@
   API 24, 30, 35, 36 and 37 passed in
   [run 38918624792](https://github.com/dr-askar/raff-app/actions/runs/38918624792).
   None of these establishes success on the affected physical Xiaomi.
-- Release signing still uses an ephemeral debug key. This is a separate confirmed
+- The published 0.4.0 used an ephemeral debug key. This was a separate confirmed
   update-distribution defect. Lost old private keys cannot be recovered from APKs.
+
+## Signed 0.4.1 candidate
+
+A fixed release key is now provisioned in protected local storage. Candidate
+0.4.1 uses certificate c9155ec138d5ba2101d80acc86301bef507e7adfc3b6675a5d5e264386eb0f86.
+[Verification and download](VERIFICATION_0.4.1.md). This candidate's signature,
+payload and emulator installation/update checks are separate from the remaining
+physical-phone incident. Do not close it without user confirmation.
+GitHub signing Secrets and an external private key backup remain unconfigured.
 
 ## Repository-side remediation
 
 The build now supports a persistent release keystore and verifies its expected
 certificate before permitting the main release job. Without provisioned secrets,
-CI artifacts remain internal and publication is skipped. The permanent key is
-not configured yet. See [ANDROID_SIGNING.md](ANDROID_SIGNING.md).
+The original Checks workflow keeps artifacts internal when its Secrets are absent.
+The alternative one-use-envelope signing route now uses the protected fixed local
+key. GitHub signing Secrets remain unconfigured. See [ANDROID_SIGNING.md](ANDROID_SIGNING.md).
 
 The earlier packaging-compatibility change in commit
 `5011bfcf0a82df2715fab00ee45a6c833e8db2d8` remains in the current source:
