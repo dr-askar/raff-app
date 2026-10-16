@@ -1,3 +1,30 @@
+# Current signing route — 0.4.1 test candidate
+
+A fixed release key has been generated in the protected local directory
+/workspace/.raff-private-signing. Public certificate pin:
+config/android-release-cert.sha256. Never replace it on a missing-key error.
+The directory is private (0700), with private-key/password files 0600; no private
+plaintext is in Git. A separate external backup remains pending.
+
+The sign-tested-candidate workflow downloads the exact successful build,
+verifies its archive digest and unchanged app inputs, and creates a one-use RSA
+recipient. The local signer seals the keystore/password with AES-256-GCM and wraps
+the AES key with RSA-OAEP/SHA-256. Context binds repository, run, CI head, app
+source, archive digest and pinned certificate. The public transfer branch holds
+only ciphertext/public keys. Decrypted CI files and the temporary recipient key
+are deleted before artifact upload. The APK is verified, compared to the original
+payload, and checked on five emulators before publishing a prerelease.
+
+Future releases must reuse the protected local key, refresh the tested-build pins,
+and repeat this handoff. No new key may be generated if a public pin already
+exists and private files are missing. This route does not establish that the
+physical Xiaomi install issue is fixed. GitHub Actions Secrets remain unset.
+
+The optional direct Secrets-based path below remains available once an owner
+provisions those Secrets. Its status is separate from the local signing route.
+
+---
+
 # Persistent Android release signing
 
 Implementation is present; production key provisioning is still pending.
@@ -44,8 +71,9 @@ keystore; do not paste passwords into a command, a report or chat. Keep using th
 same key for every release. Verify its signing validity and backup before
 distribution.
 
-The current GitHub connector cannot write repository Actions Secrets. No permanent
-private key was generated, stored or provisioned during this change. Existing
+The current GitHub connector cannot write repository Actions Secrets. The direct
+Secrets-based setup remains unconfigured. A fixed local key is now provisioned
+for the one-use encrypted signing route described above. Existing
 0.4.0 and older APK private keys remain unavailable. A new key cannot update
 those packages in place; data migration requires a verified external backup.
 

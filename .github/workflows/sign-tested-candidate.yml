@@ -1,0 +1,184 @@
+name: Sign tested Raff candidate
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/sign-tested-candidate.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  sign:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: python3 -m pip install 'cryptography>=46.0.3,<51'
+      - run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+      - name: Validate tested input and download exact APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh run view 38945202937 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = efef8f634a68cb32b2a98a7105973420e6d576d6
+          test "$(gh run view 38945202937 --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)" = success
+          git diff --exit-code efef8f634a68cb32b2a98a7105973420e6d576d6 HEAD -- lib test pubspec.yaml analysis_options.yaml firestore.rules scripts/bootstrap.sh scripts/configure_android.py scripts/check_apk_native.py config/firebase.example.json
+          gh api repos/dr-askar/raff-app/actions/artifacts/12066903928/zip > "$RUNNER_TEMP/raff-source.zip"
+          echo "bb7d323c9d8a4f8baf780283fbbcbfe180a4eaff65105815431b8ee6537046c5  $RUNNER_TEMP/raff-source.zip" | sha256sum --check
+          mkdir -p source base apk
+          unzip -q "$RUNNER_TEMP/raff-source.zip" -d source
+          test "$(cat source/apk-version.txt)" = 0.4.1
+          gh release download demo-56 --repo "$GITHUB_REPOSITORY" --pattern raff-0.4.0-universal.apk --dir base
+          echo '8f5647916554a2477a1f8f184a40e140410db4ca4ab23c725911bf952760f542  base/raff-0.4.0-universal.apk' | sha256sum --check
+      - name: Open one-use encrypted signing session
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 scripts/signing/envelope.py recipient --directory "$RUNNER_TEMP/raff-sign" --pin config/android-release-cert.sha256 --session "$GITHUB_RUN_ID" --head "$GITHUB_SHA"
+          python3 scripts/signing/ci_session.py
+          python3 scripts/signing/envelope.py open --directory "$RUNNER_TEMP/raff-sign" --pin config/android-release-cert.sha256 --session "$GITHUB_RUN_ID" --head "$GITHUB_SHA" --input "$RUNNER_TEMP/raff-sign/request.json"
+      - name: Sign and verify without rebuilding application payload
+        run: |
+          set -euo pipefail
+          RAFF_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$RAFF_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/raff-sign/release.p12" --ks-key-alias raff-release --ks-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --key-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out apk/raff-0.4.1.apk source/app-release.apk
+          "$RAFF_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/raff-sign/release.p12" --ks-key-alias raff-release --ks-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --key-pass "file:$RUNNER_TEMP/raff-sign/password.txt" --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false --out apk/baseline-test-0.4.0.apk base/raff-0.4.0-universal.apk
+          "$RAFF_TOOLS/apksigner" verify --verbose --print-certs apk/raff-0.4.1.apk | tee "$RUNNER_TEMP/candidate-cert.txt"
+          RAFF_ANDROID_CERT_SHA256=$(cat config/android-release-cert.sha256) python3 scripts/release_signing.py verify "$RUNNER_TEMP/candidate-cert.txt"
+          "$RAFF_TOOLS/apksigner" verify --verbose --print-certs apk/baseline-test-0.4.0.apk | tee "$RUNNER_TEMP/base-cert.txt"
+          RAFF_ANDROID_CERT_SHA256=$(cat config/android-release-cert.sha256) python3 scripts/release_signing.py verify "$RUNNER_TEMP/base-cert.txt"
+          "$RAFF_TOOLS/zipalign" -c -P 16 4 apk/raff-0.4.1.apk
+          unzip -t apk/raff-0.4.1.apk | tail -1
+          python3 scripts/check_apk_native.py apk/raff-0.4.1.apk
+          python3 scripts/signing/check_payload.py source/app-release.apk apk/raff-0.4.1.apk
+          "$RAFF_TOOLS/aapt" dump badging apk/raff-0.4.1.apk | sed -n '1,40p'
+          sha256sum apk/raff-0.4.1.apk | tee apk/SHA256SUMS.txt
+          cat config/android-release-cert.sha256 > apk/certificate-sha256.txt
+      - name: Destroy temporary decrypted key and session
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/raff-sign"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raff-signed-candidate
+          path: |
+            apk/raff-0.4.1.apk
+            apk/SHA256SUMS.txt
+            apk/certificate-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raff-signed-upgrade-test-base
+          path: apk/baseline-test-0.4.0.apk
+  install:
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [24, 30, 35, 36, 37]
+        include:
+          - api: 24
+            ram: 1536M
+            disk: 2048M
+          - api: 37
+            platform: 36
+            image: '37.0'
+            target: google_apis_ps16k
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-signed-candidate
+          path: apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-signed-upgrade-test-base
+          path: apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Use current SDK tools
+        if: matrix.api != 24
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "cmdline-tools;22.0"
+          set -o pipefail
+          mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/pre-raff-latest"
+          ln -s "$ANDROID_HOME/cmdline-tools/22.0" "$ANDROID_HOME/cmdline-tools/latest"
+      - name: Enable hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.platform || matrix.api }}
+          system-image-api-level: ${{ matrix.image || matrix.api }}
+          target: ${{ matrix.target || 'google_apis' }}
+          arch: x86_64
+          ram-size: ${{ matrix.ram || '4096M' }}
+          disk-size: ${{ matrix.disk || '8192M' }}
+          disable-animations: true
+          emulator-options: -no-window -gpu ${{ matrix.api == 37 && 'software' || 'swiftshader_indirect' }} -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb shell getprop ro.build.version.release
+            if [ "${{ matrix.api }}" = "37" ]; then test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = "37"; test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384"; fi
+            adb install --no-streaming apk/raff-0.4.1.apk
+            adb logcat -c
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb shell pidof com.raffapp.raff
+            adb logcat -b crash -d
+            adb shell am force-stop com.raffapp.raff
+            adb uninstall com.raffapp.raff
+            adb install --no-streaming apk/baseline-test-0.4.0.apk
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb shell am force-stop com.raffapp.raff
+            adb root
+            adb wait-for-device
+            adb shell sha256sum /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml | tr -d '\r' > before-prefs.txt
+            test -s before-prefs.txt
+            adb install --no-streaming -r apk/raff-0.4.1.apk
+            adb shell am start -W -n com.raffapp.raff/.MainActivity
+            sleep 5
+            adb shell pidof com.raffapp.raff
+            adb shell am force-stop com.raffapp.raff
+            adb shell sha256sum /data/user/0/com.raffapp.raff/shared_prefs/FlutterSharedPreferences.xml | tr -d '\r' > after-prefs.txt
+            cmp before-prefs.txt after-prefs.txt
+            echo "Stable-key upgrade retained actual app preferences."
+  publish:
+    needs: [sign, install]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: raff-signed-candidate
+          path: apk
+      - name: Publish the exact signed and tested candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RAFF_HEAD=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          test "$RAFF_HEAD" = "$GITHUB_SHA"
+          cd apk
+          sed 's#  apk/#  #' SHA256SUMS.txt > local-check.txt
+          sha256sum --check local-check.txt
+          gh release create v0.4.1 raff-0.4.1.apk SHA256SUMS.txt certificate-sha256.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "رفّ 0.4.1 — توقيع ثابت والطرود والوزن" --notes-file ../docs/RELEASE_0.4.1.md

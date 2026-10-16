@@ -39,11 +39,19 @@ Required working rules:
   alignment. Record physical-device checks separately from emulator checks.
 - No more user-facing installation-fix releases consisting only of a version
   bump, another download URL, or a freshly generated debug key.
-- Before the next distributed release, configure persistent release signing in
-  a secure secret store and verify that the APK certificate matches the intended
-  certificate. This remains NOT configured; do not imply otherwise.
-  Never put private keys/passwords in Git, public caches, artifacts, or chat.
-  If secret access is unavailable, finish reviewable code and state the blocker.
+- A persistent release key now exists in the protected local directory
+  `/workspace/.raff-private-signing` (directory 0700, secret files 0600). Its
+  public certificate pin is `config/android-release-cert.sha256`. Never replace
+  that key or pin automatically. If the private files are missing, restore the
+  original key before distributing another update.
+- GitHub Actions Secrets are NOT provisioned. The alternative signing workflow
+  accepts an RSA-OAEP/SHA-256 + AES-256-GCM envelope bound to one CI run, approved
+  source commit and artifact digest. Only encrypted envelopes/public recipients
+  may appear on the `raff-signing-transfer` branch; never plaintext private keys,
+  passwords or reusable decryption secrets in Git, caches, artifacts, or chat.
+  The CI recipient and decrypted key files must be destroyed after signing.
+  An external private backup of the persistent local key is still pending;
+  do not claim complete production key provisioning or disaster recovery.
 - Verify fresh install AND an in-place update from the previous release signed
   with the same persistent key, including retention of local data.
   A new key cannot update older packages signed with lost keys.

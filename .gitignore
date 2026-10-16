@@ -10,6 +10,10 @@ android/.gradle/
 android/key.properties
 *.jks
 *.keystore
+*.p12
+*.pfx
+password.txt
+.raff-private-signing/
 config/firebase.json
 lib/firebase_options.dart
 android/app/google-services.json
@@ -19,3 +23,4 @@ firebase-debug.log
 __pycache__/
 *.pyc
 android-install-report*.json
+
