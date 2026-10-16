@@ -25,12 +25,24 @@
 
 ## Signed 0.4.1 candidate
 
+**Physical-device attempt FAILED.** Screenshot `209979.jpg` shows
+`raff-0.4.1.apk`, 41.34 MB, with the same generic German installer rejection.
+The fixed release certificate and five passing emulator checks did not resolve
+or identify this physical-phone failure. No specific PackageManager error has
+been obtained. Do not offer the same APK download as a new fix.
+
 A fixed release key is now provisioned in protected local storage. Candidate
 0.4.1 uses certificate c9155ec138d5ba2101d80acc86301bef507e7adfc3b6675a5d5e264386eb0f86.
 [Verification and download](VERIFICATION_0.4.1.md). This candidate's signature,
 payload and emulator installation/update checks are separate from the remaining
 physical-phone incident. Do not close it without user confirmation.
 GitHub signing Secrets and an external private key backup remain unconfigured.
+
+The separate [native installer helper](INSTALL_HELPER.md) attempts the unchanged
+hash-pinned APK through the public PackageInstaller session API and displays its
+status/message locally, without a computer or broad device logs. It never
+uninstalls Raff or changes its package ID. It remains a diagnostic path, not a
+proven fix. If it cannot itself install, that path supplies no platform result.
 
 ## Repository-side remediation
 

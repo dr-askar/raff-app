@@ -21,7 +21,8 @@ Read [docs/ANDROID_INSTALLATION.md](docs/ANDROID_INSTALLATION.md) before changin
 Android packaging, signing, release workflows, or responding to an install failure.
 
 The user reports that `raff-0.4.0-universal.apk` still fails to install AFTER
-removing the old application. Do not ask them to repeat that removal or repeat
+removing the old application, and the signed `raff-0.4.1.apk` also fails (latest
+screenshot 209979.jpg, 41.34 MB). Do not ask them to repeat that removal or repeat
 the same download as a solution. The generic installer message does not establish
 the cause. Different signing certificates explain rejected updates but do not,
 by themselves, explain a clean-install rejection.
@@ -39,6 +40,12 @@ Required working rules:
   alignment. Record physical-device checks separately from emulator checks.
 - No more user-facing installation-fix releases consisting only of a version
   bump, another download URL, or a freshly generated debug key.
+- `tools/install-helper` is a separate native diagnostic installer, not a renamed
+  Raff or a claimed causal fix. It embeds the unchanged, hash-pinned 0.4.1 APK,
+  uses normal PackageInstaller consent and displays the platform result. Keep
+  its receiver private, callbacks session-bound, and reports local. Do not add
+  uninstall/clear-data/downgrade/security-bypass behavior. Its synthetic future
+  version fixture is for disposable CI emulators only, never a user release.
 - A persistent release key now exists in the protected local directory
   `/workspace/.raff-private-signing` (directory 0700, secret files 0600). Its
   public certificate pin is `config/android-release-cert.sha256`. Never replace

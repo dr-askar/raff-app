@@ -1,0 +1,131 @@
+name: Build and test native install diagnostics
+on:
+  push:
+    branches: [main]
+    paths: ['tools/install-helper/**', '.github/workflows/install-helper.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download unchanged Raff release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p tools/install-helper/assets
+          gh release download v0.4.1 --repo "$GITHUB_REPOSITORY" --pattern raff-0.4.1.apk --dir tools/install-helper/assets
+          echo '5857b79d51300d3de282dd4454d0fab6a74e1c9c21bdb7d0fd2f703d817f6926  tools/install-helper/assets/raff-0.4.1.apk' | sha256sum --check
+          git diff --exit-code efef8f634a68cb32b2a98a7105973420e6d576d6 HEAD -- lib test pubspec.yaml scripts/bootstrap.sh scripts/configure_android.py
+      - name: SDK and signing protocol tests
+        run: |
+          python3 -m pip install 'cryptography>=46.0.3,<51'
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          set -o pipefail
+      - name: One-use signing session for helper
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 scripts/signing/envelope.py recipient --directory "$RUNNER_TEMP/raff-sign" --pin config/android-release-cert.sha256 --session "$GITHUB_RUN_ID" --head "$GITHUB_SHA"
+          python3 scripts/signing/ci_session.py
+          python3 scripts/signing/envelope.py open --directory "$RUNNER_TEMP/raff-sign" --pin config/android-release-cert.sha256 --session "$GITHUB_RUN_ID" --head "$GITHUB_SHA" --input "$RUNNER_TEMP/raff-sign/request.json"
+      - name: Compile and verify native helper
+        run: |
+          RAFF_RELEASE_KEYSTORE="$RUNNER_TEMP/raff-sign/release.p12" RAFF_PASSWORD_FILE="$RUNNER_TEMP/raff-sign/password.txt" bash tools/install-helper/build.sh
+      - name: Destroy temporary decrypted signing material
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/raff-sign"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-install-helper
+          path: |
+            helper-apk/raff-install-helper.apk
+            helper-apk/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-only-future-version-fixture
+          retention-days: 1
+          path: helper-apk/ci-only-future.apk
+  device-flow:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [30, 37]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-install-helper
+          path: apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-only-future-version-fixture
+          path: apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Current SDK tools
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'cmdline-tools;22.0'
+          set -o pipefail
+          mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/pre-raff-latest"
+          ln -s "$ANDROID_HOME/cmdline-tools/22.0" "$ANDROID_HOME/cmdline-tools/latest"
+      - name: Enable hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api == 37 && 36 || matrix.api }}
+          system-image-api-level: ${{ matrix.api == 37 && '37.0' || matrix.api }}
+          target: ${{ matrix.api == 37 && 'google_apis_ps16k' || 'google_apis' }}
+          arch: x86_64
+          ram-size: 4096M
+          disk-size: 8192M
+          disable-animations: true
+          emulator-options: -no-window -gpu ${{ matrix.api == 37 && 'software' || 'swiftshader_indirect' }} -noaudio -no-boot-anim -camera-back none
+          script: python3 tools/install-helper/tests/device_flow.py
+  publish:
+    needs: [build, device-flow]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-install-helper
+          path: apk
+      - name: Publish exact tested helper separately from Raff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+          cd apk
+          sha256sum --check SHA256SUMS.txt
+          gh release create install-helper-v1 raff-install-helper.apk SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'مساعد تثبيت رفّ — عرض سبب أندرويد' --notes-file ../docs/INSTALL_HELPER.md
