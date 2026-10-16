@@ -14,5 +14,14 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - name: Confirm regression fails before the fix
+        run: |
+          cp lib/data/xlsx_values.dart /tmp/raff-xlsx-fixed.dart
+          git show cca8e1ccfccd316117ab5122f8e9a5fe4edf1a19:lib/data/xlsx_values.dart > lib/data/xlsx_values.dart
+          if flutter test test/mobile_values_test.dart --reporter expanded; then
+            echo 'Expected the baseline decoder to fail the duplicate-string fixture'
+            exit 1
+          fi
+          cp /tmp/raff-xlsx-fixed.dart lib/data/xlsx_values.dart
       - run: flutter analyze
       - run: flutter test --reporter expanded
