@@ -1,8 +1,36 @@
 # Android installation incident
 
-**Status: OPEN — physical-device cause not yet established. Updated 2026-10-16.**
+**Status: PHYSICAL INSTALL SUCCEEDED VIA HELPER — awaiting app launch confirmation;
+original OEM installer cause remains undetermined. Updated 2026-10-16.**
 
-## Confirmed facts
+## Latest physical-device result
+
+The user pasted the native helper report in this conversation:
+
+```text
+Raff installer helper 1
+Raff 0.4.1 / code 9
+SHA256: 5857b79d51300d3de282dd4454d0fab6a74e1c9c21bdb7d0fd2f703d817f6926
+Android 17 / API 37
+Xiaomi 2506BPN68G
+ABI: arm64-v8a
+Installed version visible to this user: 0.4.1 (9)
+Status: 0
+Legacy: 1
+INSTALL_SUCCEEDED: Session installed
+```
+
+This is reported physical installation success for the exact pinned APK through
+the helper's PackageInstaller session path, not merely emulator success. Legacy
+1 is PackageManager's success code; it does not contradict PackageInstaller
+Status 0. App launch on the physical phone remains unconfirmed. Direct opening
+of the APK from the OEM/file manager previously failed; the successful alternate
+path does not establish the cause of that failure. Do not request another copy
+or reinstall. The next user action is the helper's «فتح رفّ» button (or Raff's
+launcher icon). Close the user installation block only after launch is confirmed;
+retain the unresolved OEM-path finding separately.
+
+## Earlier 0.4.0 evidence (historical)
 
 - The user identified a Xiaomi 15T Pro, HyperOS 3.0.336.0, Android 17.
 - The latest screenshot shows `raff-0.4.0-universal.apk`, 41.30 MB, and
@@ -10,7 +38,7 @@
 - The user explicitly confirmed the old app was deleted before this attempt.
   Do not repeat uninstall advice or diagnose this as an update-signature conflict
   without evidence of another installed package/user.
-- Current artifact: package `com.raffapp.raff`, version 0.4.0 / code 8,
+- Historical 0.4.0 artifact: package `com.raffapp.raff`, version 0.4.0 / code 8,
   minimum SDK 24, target SDK 36; ARM32, ARM64 and x86_64.
 - Exact size: 41,296,509 bytes.
 - SHA-256: `8f5647916554a2477a1f8f184a40e140410db4ca4ab23c725911bf952760f542`.
@@ -25,7 +53,7 @@
 
 ## Signed 0.4.1 candidate
 
-**Physical-device attempt FAILED.** Screenshot `209979.jpg` shows
+**Earlier direct physical-device attempt FAILED.** Screenshot `209979.jpg` shows
 `raff-0.4.1.apk`, 41.34 MB, with the same generic German installer rejection.
 The fixed release certificate and five passing emulator checks did not resolve
 or identify this physical-phone failure. No specific PackageManager error has
@@ -110,8 +138,8 @@ state that physical-device diagnostics remain blocked rather than inventing a ca
 ## Release and closure requirements
 
 1. Diagnose the affected physical-device path; document actual error and causal fix.
-2. Configure one persistent release key through a secure secret store. This is
-   pending, not implemented by this document. Do not publish keys in caches.
+2. Preserve the existing fixed release key and pin. GitHub Secrets provisioning
+   and a private external backup remain pending. Do not publish keys in caches.
 3. Validate certificate continuity, SDK/ABIs, signature, ZIP integrity and native
    alignment on the exact candidate APK.
 4. Verify fresh installation and launch on the affected Xiaomi. Separately test

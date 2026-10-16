@@ -15,7 +15,15 @@
 - Keep the exchange summary compact so the materials list has more room.
   See [docs/FEATURES_0.4.1.md](docs/FEATURES_0.4.1.md) for examples and validation.
 
-## Android installation incident — OPEN (2026-10-16)
+## Android installation incident — INSTALLED VIA HELPER; LAUNCH PENDING (2026-10-16)
+
+Latest physical evidence: the user pasted helper 1 output for the pinned 0.4.1
+APK on Xiaomi 2506BPN68G, Android 17/API 37, arm64-v8a. It reports installed
+version 0.4.1/code 9, Status 0, Legacy 1, `INSTALL_SUCCEEDED: Session installed`.
+Record physical installation via PackageInstaller as successful. Opening the
+actual Raff app has not yet been confirmed. Keep the incident open for launch
+confirmation and the unresolved cause of the original OEM/file-manager flow.
+Do not ask the user to download or install the same APK again.
 
 Read [docs/ANDROID_INSTALLATION.md](docs/ANDROID_INSTALLATION.md) before changing
 Android packaging, signing, release workflows, or responding to an install failure.
