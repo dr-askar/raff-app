@@ -18,3 +18,5 @@
 
 مصدر البناء: a1004ce3e5d14eb9daf05adaadf3c191e939de9f.
 التحقق: https://github.com/dr-askar/raff-app/actions/runs/38850777908
+
+فحص أندرويد 7 المستقل: https://github.com/dr-askar/raff-app/actions/runs/38852465680

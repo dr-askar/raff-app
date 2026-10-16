@@ -1,8 +1,5 @@
 name: Verify Android 7 and publish the existing tested APK
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/verify-legacy-apk.yml']
   workflow_dispatch:
 permissions:
   actions: read
@@ -69,5 +66,5 @@ jobs:
             gh release upload demo-36 apk/raff-0.3.2-universal.apk --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit demo-36 --repo "$GITHUB_REPOSITORY" --notes-file apk/release-notes.md
           else
-            gh release create demo-36 apk/raff-0.3.2-universal.apk --repo "$GITHUB_REPOSITORY" --target a1004ce3e5d14eb9daf05adaadf3c191e939de9f --prerelease --title 'رفّ 0.3.2 — استيراد ومساومة' --notes-file apk/release-notes.md
+            gh release create demo-36 apk/raff-0.3.2-universal.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title 'رفّ 0.3.2 — استيراد ومساومة' --notes-file apk/release-notes.md
           fi
