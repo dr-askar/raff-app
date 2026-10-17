@@ -29,14 +29,15 @@
 - Keep the exchange summary compact so the materials list has more room.
   See [docs/FEATURES_0.4.1.md](docs/FEATURES_0.4.1.md) for examples and validation.
 
-## Android installation incident — INSTALLED VIA HELPER; LAUNCH PENDING (2026-10-16)
+## Physical installation — 0.4.1 RUNNING VIA HELPER; OEM PATH UNEXPLAINED (2026-10-17)
 
 Latest physical evidence: the user pasted helper 1 output for the pinned 0.4.1
 APK on Xiaomi 2506BPN68G, Android 17/API 37, arm64-v8a. It reports installed
 version 0.4.1/code 9, Status 0, Legacy 1, `INSTALL_SUCCEEDED: Session installed`.
-Record physical installation via PackageInstaller as successful. Opening the
-actual Raff app has not yet been confirmed. Keep the incident open for launch
-confirmation and the unresolved cause of the original OEM/file-manager flow.
+Record physical installation via PackageInstaller as successful. The user subsequently supplied product-editor and Excel screenshots
+210439.jpg / 210436.jpg while using the app, confirming launch. The 0.4.1 user
+installation block is resolved through the helper; retain the unexplained OEM
+file-manager path separately. New 0.4.2 physical upgrade confirmation is pending.
 Do not ask the user to download or install the same APK again.
 
 Read [docs/ANDROID_INSTALLATION.md](docs/ANDROID_INSTALLATION.md) before changing

@@ -1,7 +1,7 @@
 # Android installation incident
 
-**Status: PHYSICAL INSTALL SUCCEEDED VIA HELPER — awaiting app launch confirmation;
-original OEM installer cause remains undetermined. Updated 2026-10-16.**
+**Status: 0.4.1 INSTALLED AND RUNNING VIA HELPER; original OEM installer cause
+remains undetermined. 0.4.2 phone upgrade unconfirmed. Updated 2026-10-17.**
 
 ## Latest physical-device result
 
@@ -23,12 +23,13 @@ INSTALL_SUCCEEDED: Session installed
 This is reported physical installation success for the exact pinned APK through
 the helper's PackageInstaller session path, not merely emulator success. Legacy
 1 is PackageManager's success code; it does not contradict PackageInstaller
-Status 0. App launch on the physical phone remains unconfirmed. Direct opening
-of the APK from the OEM/file manager previously failed; the successful alternate
-path does not establish the cause of that failure. Do not request another copy
-or reinstall. The next user action is the helper's «فتح رفّ» button (or Raff's
-launcher icon). Close the user installation block only after launch is confirmed;
-retain the unresolved OEM-path finding separately.
+Status 0. The user's subsequent 2026-10-17 product editor and Excel screenshots
+210439.jpg / 210436.jpg show that the app is running. The 0.4.1 user installation
+block is resolved through the helper. Direct opening from the OEM/file manager
+previously failed; the alternate path does not establish that cause. Do not
+repeat removal advice. 0.4.2 uses the same fixed certificate and has a matching
+helper 2; see VERIFICATION_0.4.2.md for emulator upgrade/data-retention proof.
+Physical confirmation of the new upgrade remains pending.
 
 ## Earlier 0.4.0 evidence (historical)
 
