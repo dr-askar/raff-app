@@ -45,6 +45,12 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        SharedPreferences saved = InstallState.prefs(this);
+        if (saved.getInt("targetCode", -1) != ReleaseInfo.CODE) {
+            // A success for an older embedded APK is not success for this update.
+            saved.edit().remove("status").remove("message").remove("legacy")
+                .remove("active").remove("session").putInt("targetCode", ReleaseInfo.CODE).commit();
+        }
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(Color.rgb(241, 245, 250));

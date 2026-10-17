@@ -90,9 +90,20 @@ if Path('apk/baseline.apk').exists():
     adb('shell', 'am', 'force-stop', RAFF)
     baseline_prefs = adb('shell', 'cat', f'/data/user/0/{RAFF}/shared_prefs/FlutterSharedPreferences.xml')
     assert 'flutter.' in baseline_prefs
-adb('install', '--no-streaming', 'apk/raff-install-helper.apk')
+if Path('apk/baseline-helper.apk').exists():
+    adb('install', '--no-streaming', 'apk/baseline-helper.apk')
+    adb('shell', 'appops', 'set', HELPER, 'REQUEST_INSTALL_PACKAGES', 'allow')
+    adb('shell', 'am', 'start', '-W', '-n', HELPER + '/.MainActivity')
+    click_text('تثبيت رفّ وإظهار النتيجة')
+    assert approve_or_finish().get('status') == '0'
+    adb('shell', 'am', 'force-stop', HELPER)
+adb('install', '--no-streaming', '-r', 'apk/raff-install-helper.apk')
 adb('shell', 'appops', 'set', HELPER, 'REQUEST_INSTALL_PACKAGES', 'allow')
 adb('shell', 'am', 'start', '-W', '-n', HELPER + '/.MainActivity')
+if Path('apk/baseline-helper.apk').exists():
+    wait_for(lambda: any(n.attrib.get('text') == 'جاهز للتثبيت' for n in nodes()))
+    assert prefs().get('targetCode') == str(APP_CODE)
+    print('PASS: updated helper reset stale success from the older embedded app.', flush=True)
 click_text('تثبيت رفّ وإظهار النتيجة')
 first = approve_or_finish()
 assert first.get('status') == '0', first

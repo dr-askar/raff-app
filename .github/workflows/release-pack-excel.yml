@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 50
     permissions:
       contents: write
-      actions: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +25,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Cancel obsolete release attempt before receiving a key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh run view 39052300117 --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = d2958a1fffde110472b66c47653d2fc1c30d468c ]; then
+            gh run cancel 39052300117 --repo "$GITHUB_REPOSITORY" || true
+          fi
       - name: Wait for all source checks and download tested bytes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -45,6 +52,9 @@ jobs:
           gh release download v0.4.1 --repo "$GITHUB_REPOSITORY" --pattern raff-0.4.1.apk --dir ci-only
           echo '5857b79d51300d3de282dd4454d0fab6a74e1c9c21bdb7d0fd2f703d817f6926  ci-only/raff-0.4.1.apk' | sha256sum --check
           mv ci-only/raff-0.4.1.apk ci-only/baseline.apk
+          gh release download install-helper-v1 --repo "$GITHUB_REPOSITORY" --pattern raff-install-helper.apk --dir ci-only
+          echo '56a1d7a3c8558aec64a4f289b588f1da0a48de50ffd58776aa86a237230cd62a  ci-only/raff-install-helper.apk' | sha256sum --check
+          mv ci-only/raff-install-helper.apk ci-only/baseline-helper.apk
       - name: Verify signing protocol and open one-use session
         env:
           GH_TOKEN: ${{ github.token }}
