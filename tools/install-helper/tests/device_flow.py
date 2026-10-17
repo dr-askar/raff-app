@@ -68,10 +68,11 @@ def prefs():
         return {}
 
 
-def approve_or_finish():
+def approve_or_finish(previous_session):
     def progress():
         p = prefs()
-        if p.get('status') not in (None, '-2', '-1'):
+        new_session = p.get('session') is not None and p.get('session') != previous_session
+        if new_session and p.get('status') not in (None, '-2', '-1'):
             return p
         for n in nodes():
             package = n.attrib.get('package', '')
@@ -81,6 +82,14 @@ def approve_or_finish():
                 break
         return None
     return wait_for(progress, seconds=150)
+
+
+def install_from_helper():
+    # input tap can return before the Activity has replaced the previous result.
+    # A completed result belongs to this attempt only after its session changes.
+    previous_session = prefs().get('session')
+    click_text('تثبيت رفّ وإظهار النتيجة')
+    return approve_or_finish(previous_session)
 
 
 adb('root')
@@ -103,8 +112,7 @@ if Path('apk/baseline-helper.apk').exists():
     adb('install', '--no-streaming', 'apk/baseline-helper.apk')
     adb('shell', 'appops', 'set', HELPER, 'REQUEST_INSTALL_PACKAGES', 'allow')
     adb('shell', 'am', 'start', '-W', '-n', HELPER + '/.MainActivity')
-    click_text('تثبيت رفّ وإظهار النتيجة')
-    assert approve_or_finish().get('status') == '0'
+    assert install_from_helper().get('status') == '0'
     adb('shell', 'am', 'force-stop', HELPER)
 adb('install', '--no-streaming', '-r', 'apk/raff-install-helper.apk')
 adb('shell', 'appops', 'set', HELPER, 'REQUEST_INSTALL_PACKAGES', 'allow')
@@ -113,8 +121,7 @@ if Path('apk/baseline-helper.apk').exists():
     wait_for(lambda: any(n.attrib.get('text') == 'جاهز للتثبيت' for n in nodes()))
     assert prefs().get('targetCode') == str(APP_CODE)
     print('PASS: updated helper reset stale success from the older embedded app.', flush=True)
-click_text('تثبيت رفّ وإظهار النتيجة')
-first = approve_or_finish()
+first = install_from_helper()
 assert first.get('status') == '0', first
 assert f'versionCode={APP_CODE}' in adb('shell', 'dumpsys', 'package', RAFF)
 if baseline_prefs is not None:
@@ -128,8 +135,7 @@ adb('shell', 'am', 'force-stop', RAFF)
 before = adb('shell', 'cat', f'/data/user/0/{RAFF}/shared_prefs/FlutterSharedPreferences.xml')
 assert 'flutter.' in before
 adb('shell', 'am', 'start', '-W', '-n', HELPER + '/.MainActivity')
-click_text('تثبيت رفّ وإظهار النتيجة')
-second = approve_or_finish()
+second = install_from_helper()
 assert second.get('status') == '0', second
 after = adb('shell', 'cat', f'/data/user/0/{RAFF}/shared_prefs/FlutterSharedPreferences.xml')
 assert before == after
@@ -137,8 +143,7 @@ print('PASS: helper re-install retained actual Raff preferences.', flush=True)
 adb('shell', 'am', 'force-stop', HELPER)
 adb('install', '--no-streaming', '-r', 'apk/ci-only-future.apk')
 adb('shell', 'am', 'start', '-W', '-n', HELPER + '/.MainActivity')
-click_text('تثبيت رفّ وإظهار النتيجة')
-failure = approve_or_finish()
+failure = install_from_helper()
 assert failure.get('status') not in ('0', '-1', '-2'), failure
 assert 'INSTALL_FAILED_VERSION_DOWNGRADE' in failure.get('message', ''), failure
 assert f'versionCode={APP_CODE+1}' in adb('shell', 'dumpsys', 'package', RAFF)
