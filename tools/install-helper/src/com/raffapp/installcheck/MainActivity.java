@@ -35,7 +35,7 @@ import java.util.Locale;
 
 public final class MainActivity extends Activity {
     static final String RAFF = "com.raffapp.raff";
-    static final String EXPECTED = "5857b79d51300d3de282dd4454d0fab6a74e1c9c21bdb7d0fd2f703d817f6926";
+    static final String EXPECTED = ReleaseInfo.HASH;
     private TextView title, details, device;
     private Button install, open;
     private boolean visible;
@@ -55,7 +55,7 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
         TextView heading = text("مساعد تثبيت رفّ", 27, true);
         root.addView(heading);
-        root.addView(text("نسخة رفّ 0.4.1 موجودة داخل الأداة. اضغط الزر ثم وافق على نافذة أندرويد. إذا رفض الهاتف، ستظهر رسالة السبب هنا.", 18, false));
+        root.addView(text("نسخة رفّ " + ReleaseInfo.VERSION + " موجودة داخل الأداة. اضغط الزر ثم وافق على نافذة أندرويد. إذا رفض الهاتف، ستظهر رسالة السبب هنا.", 18, false));
         root.addView(text("هذه أداة منفصلة للتثبيت والفحص. لا تحذف رفّ ولا تمسح بياناته، ولا تحتاج إنترنت أو كمبيوتر.", 15, false));
         install = new Button(this);
         install.setId(1001);
@@ -128,7 +128,7 @@ public final class MainActivity extends Activity {
     }
     private String report() {
         SharedPreferences p = InstallState.prefs(this);
-        return "Raff installer helper 1\nRaff 0.4.1 / code 9\nSHA256: " + EXPECTED
+        return "Raff installer helper " + ReleaseInfo.HELPER + "\nRaff " + ReleaseInfo.VERSION + " / code " + ReleaseInfo.CODE + "\nSHA256: " + EXPECTED
             + "\n" + environment() + "\nStatus: " + p.getInt("status", -9)
             + "\nLegacy: " + p.getInt("legacy", 0) + "\n" + p.getString("message", "");
     }
@@ -140,7 +140,7 @@ public final class MainActivity extends Activity {
         String message = p.getString("message", "");
         details.setText(hasResult ? "رمز أندرويد: " + status + "\nLegacy: " + p.getInt("legacy", 0)
             + "\n\n" + (message.isEmpty() ? (status == 0 ? "نجحت عملية التثبيت." : "لا توجد تفاصيل إضافية من أندرويد حتى الآن.") : message)
-            : "النسخة المضمّنة مطابقة لملف 0.4.1 المنشور. لا يبدأ التثبيت إلا بضغطك على الزر.");
+            : "النسخة المضمّنة هي رفّ " + ReleaseInfo.VERSION + ". لا يبدأ التثبيت إلا بضغطك على الزر.");
         device.setText(environment());
         open.setVisibility(status == 0 ? View.VISIBLE : View.GONE);
         install.setEnabled(!p.getBoolean("active", false) || status == -1);
@@ -171,20 +171,20 @@ public final class MainActivity extends Activity {
     }
     private void prepare() {
         int sessionId = -1;
-        File apk = new File(getCacheDir(), "raff-0.4.1.apk");
+        File apk = new File(getCacheDir(), "raff-app.apk");
         PackageInstaller installer = getPackageManager().getPackageInstaller();
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[65536];
-            try (InputStream input = getAssets().open("raff-0.4.1.apk"); OutputStream out = new FileOutputStream(apk)) {
+            try (InputStream input = getAssets().open("raff-app.apk"); OutputStream out = new FileOutputStream(apk)) {
                 int n; while ((n = input.read(buffer)) != -1) { out.write(buffer, 0, n); digest.update(buffer, 0, n); }
             }
             StringBuilder hex = new StringBuilder();
             for (byte b : digest.digest()) hex.append(String.format(Locale.ROOT, "%02x", b & 255));
             if (!EXPECTED.equals(hex.toString())) throw new SecurityException("بصمة نسخة رفّ المضمّنة غير مطابقة؛ لم يبدأ التثبيت.");
             PackageInfo info = getPackageManager().getPackageArchiveInfo(apk.getPath(), 0);
-            if (info == null || !RAFF.equals(info.packageName) || info.versionCode != 9)
-                throw new SecurityException("تعذر التحقق من هوية رفّ 0.4.1؛ لم يبدأ التثبيت.");
+            if (info == null || !RAFF.equals(info.packageName) || info.versionCode != ReleaseInfo.CODE)
+                throw new SecurityException("تعذر التحقق من هوية رفّ " + ReleaseInfo.VERSION + "؛ لم يبدأ التثبيت.");
             PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
             params.setAppPackageName(RAFF); params.setAppLabel("رفّ"); params.setSize(apk.length());
             if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED);

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Drive the real helper + Android consent UI on disposable CI emulators only."""
 import re
+import os
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -8,6 +9,7 @@ from pathlib import Path
 
 HELPER = 'com.raffapp.installcheck'
 RAFF = 'com.raffapp.raff'
+APP_CODE = int(os.environ.get('RAFF_TEST_APP_CODE', '9'))
 
 
 def adb(*args, check=True):
@@ -74,13 +76,30 @@ def approve_or_finish():
 
 adb('root')
 adb('wait-for-device')
+baseline_prefs = None
+if Path('apk/baseline.apk').exists():
+    assert adb('shell', 'getprop', 'ro.kernel.qemu').strip() == '1', 'Disposable CI emulator required'
+    adb('install', '--no-streaming', 'apk/candidate.apk')
+    adb('shell', 'am', 'start', '-W', '-n', RAFF + '/.MainActivity')
+    time.sleep(5)
+    assert adb('shell', 'pidof', RAFF).strip()
+    adb('uninstall', RAFF)  # Synthetic CI fresh-install check only.
+    adb('install', '--no-streaming', 'apk/baseline.apk')
+    adb('shell', 'am', 'start', '-W', '-n', RAFF + '/.MainActivity')
+    time.sleep(5)
+    adb('shell', 'am', 'force-stop', RAFF)
+    baseline_prefs = adb('shell', 'cat', f'/data/user/0/{RAFF}/shared_prefs/FlutterSharedPreferences.xml')
+    assert 'flutter.' in baseline_prefs
 adb('install', '--no-streaming', 'apk/raff-install-helper.apk')
 adb('shell', 'appops', 'set', HELPER, 'REQUEST_INSTALL_PACKAGES', 'allow')
 adb('shell', 'am', 'start', '-W', '-n', HELPER + '/.MainActivity')
 click_text('تثبيت رفّ وإظهار النتيجة')
 first = approve_or_finish()
 assert first.get('status') == '0', first
-assert 'versionCode=9' in adb('shell', 'dumpsys', 'package', RAFF)
+assert f'versionCode={APP_CODE}' in adb('shell', 'dumpsys', 'package', RAFF)
+if baseline_prefs is not None:
+    assert baseline_prefs == adb('shell', 'cat', f'/data/user/0/{RAFF}/shared_prefs/FlutterSharedPreferences.xml')
+    print('PASS: real previous-release upgrade retained Raff preferences.', flush=True)
 print('PASS: helper installed the exact Raff APK through Android consent UI.', flush=True)
 adb('shell', 'am', 'start', '-W', '-n', RAFF + '/.MainActivity')
 time.sleep(5)
@@ -101,7 +120,7 @@ click_text('تثبيت رفّ وإظهار النتيجة')
 failure = approve_or_finish()
 assert failure.get('status') not in ('0', '-1', '-2'), failure
 assert 'INSTALL_FAILED_VERSION_DOWNGRADE' in failure.get('message', ''), failure
-assert 'versionCode=10' in adb('shell', 'dumpsys', 'package', RAFF)
+assert f'versionCode={APP_CODE+1}' in adb('shell', 'dumpsys', 'package', RAFF)
 assert before == adb('shell', 'cat', f'/data/user/0/{RAFF}/shared_prefs/FlutterSharedPreferences.xml')
 wait_for(lambda: any('INSTALL_FAILED_VERSION_DOWNGRADE' in n.attrib.get('text', '') for n in nodes()))
 print('PASS: actual Android rejection code displayed in helper UI; installed package/data unchanged.', flush=True)

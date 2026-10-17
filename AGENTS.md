@@ -1,7 +1,5 @@
 # Raff project instructions
 
-## Product entry conventions (0.4.1)
-
 ## Excel conventions (0.4.2)
 
 - New Products exports use Arabic headers, pack cost and currency, pack content,
@@ -15,6 +13,8 @@
 - Empty quantity/cost fields preserve existing values, new name-only rows work,
   zero is an explicit update, and weighted quantities retain fractions.
 - See docs/FEATURES_0.4.2.md for the exact field meanings and examples.
+
+## Product entry conventions
 
 - The visible types are «طرد» and «وزن», defaulting to «طرد». The stored values
   remain `piece` and `kg` for compatibility. A pack-type barcode adds one piece
@@ -63,7 +63,9 @@ Required working rules:
 - No more user-facing installation-fix releases consisting only of a version
   bump, another download URL, or a freshly generated debug key.
 - `tools/install-helper` is a separate native diagnostic installer, not a renamed
-  Raff or a claimed causal fix. It embeds the unchanged, hash-pinned 0.4.1 APK,
+  Raff or a claimed causal fix. It embeds an unchanged, hash-pinned release APK;
+  `build.sh` generates ReleaseInfo with the approved version/code/digest. Helper
+  1 embeds 0.4.1; helper 2 is built for 0.4.2. Always verify exact embedded bytes.
   uses normal PackageInstaller consent and displays the platform result. Keep
   its receiver private, callbacks session-bound, and reports local. Do not add
   uninstall/clear-data/downgrade/security-bypass behavior. Its synthetic future
@@ -78,6 +80,8 @@ Required working rules:
   source commit and artifact digest. Only encrypted envelopes/public recipients
   may appear on the `raff-signing-transfer` branch; never plaintext private keys,
   passwords or reusable decryption secrets in Git, caches, artifacts, or chat.
+  For a new tested release, pass explicit approved --source and --artifact-digest
+  to recipient/seal/open; both are authenticated with the CI head and run ID.
   The CI recipient and decrypted key files must be destroyed after signing.
   An external private backup of the persistent local key is still pending;
   do not claim complete production key provisioning or disaster recovery.

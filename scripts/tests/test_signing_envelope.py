@@ -11,6 +11,16 @@ SPEC.loader.exec_module(MOD)
 
 
 class EnvelopeTests(unittest.TestCase):
+    def test_source_and_artifact_are_bound_to_the_session(self):
+        with tempfile.TemporaryDirectory() as name:
+            ctx = MOD.context("123", "a" * 40, "b" * 64, "c" * 40, "d" * 64)
+            public = MOD.recipient(Path(name), ctx)
+            self.assertEqual(ctx["app_source"], "c" * 40)
+            self.assertEqual(ctx["artifact_digest"], "d" * 64)
+            for changed in [dict(ctx, app_source="e" * 40), dict(ctx, artifact_digest="f" * 64)]:
+                with self.assertRaises(ValueError):
+                    MOD.seal(public, changed, {"fixture": True})
+
     def test_authenticated_roundtrip_and_no_plaintext(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

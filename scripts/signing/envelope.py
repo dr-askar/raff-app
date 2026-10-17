@@ -38,9 +38,9 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
-def context(session, head, fingerprint):
+def context(session, head, fingerprint, source=APP_SOURCE, artifact=ARTIFACT_DIGEST):
     return dict(repository=REPO, session=str(session), ci_head=head,
-                app_source=APP_SOURCE, artifact_digest=ARTIFACT_DIGEST,
+                app_source=source, artifact_digest=artifact,
                 certificate_sha256=fingerprint.strip().lower())
 
 
@@ -118,13 +118,15 @@ def main():
     parser.add_argument("--pin", type=Path, required=True)
     parser.add_argument("--session")
     parser.add_argument("--head")
+    parser.add_argument("--source", default=APP_SOURCE)
+    parser.add_argument("--artifact-digest", default=ARTIFACT_DIGEST)
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.operation == "init":
         print("Certificate SHA-256:", init(args.directory, args.pin))
         return
-    ctx = context(args.session, args.head, args.pin.read_text())
+    ctx = context(args.session, args.head, args.pin.read_text(), args.source, args.artifact_digest)
     if args.operation == "recipient":
         recipient(args.directory, ctx)
     elif args.operation == "seal":
