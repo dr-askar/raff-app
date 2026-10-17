@@ -155,10 +155,12 @@ class StoreFiles {
         // without the column preserve an existing product's unit.
         final unit = headers.contains('unit') ? productUnit(field('unit')) : old?.unit ?? 'piece';
         final pieces = numeric('pack_pieces'), weight = numeric('pack_weight');
-        if ((unit == 'kg' && pieces != null) || (unit == 'piece' && weight != null)) {
-          throw const FormatException('عدد القطع للطرد ووزن الطرد للصنف الموزون؛ تحقق من نوع الصنف');
+        if ((unit == 'piece' && weight != null) ||
+            (unit == 'kg' && pieces != null && weight != null && pieces != weight)) {
+          throw const FormatException('تحقق من نوع الصنف وتطابق محتوى الطرد ووزنه');
         }
-        final pack = (unit == 'kg' ? weight : pieces) ?? numeric('pack');
+        // Older Arabic files used the pieces header for weighted pack content too.
+        final pack = (unit == 'kg' ? weight ?? pieces : pieces) ?? numeric('pack');
         final units = pack ?? old?.pack ?? 1.0;
         if (!['kg', 'piece'].contains(unit) || units <= 0 || (unit == 'piece' && (units < 1 || units != units.roundToDouble()))) {
           throw const FormatException('تحقق من وحدة البيع ومحتوى الطرد الموجب');
