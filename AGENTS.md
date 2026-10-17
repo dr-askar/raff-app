@@ -2,6 +2,20 @@
 
 ## Product entry conventions (0.4.1)
 
+## Excel conventions (0.4.2)
+
+- New Products exports use Arabic headers, pack cost and currency, pack content,
+  whole pack count and loose pieces. Weighted rows use kg stock and kg pack
+  content. Do not export per-unit cost or ambiguous `quantity` in new files.
+- Pack-based manual sale prices are divided by pack content on import too;
+  derived pack sale price/exchange rate columns are informational only.
+- Keep reading legacy `pack`, `quantity`, `cost_usd`, `cost_syp`, `manual_price`
+  with their original per-piece/per-kg semantics. Never reinterpret old numbers
+  as pack costs. Mixed contradictory bases are row warnings, not guessed values.
+- Empty quantity/cost fields preserve existing values, new name-only rows work,
+  zero is an explicit update, and weighted quantities retain fractions.
+- See docs/FEATURES_0.4.2.md for the exact field meanings and examples.
+
 - The visible types are «طرد» and «وزن», defaulting to «طرد». The stored values
   remain `piece` and `kg` for compatibility. A pack-type barcode adds one piece
   to the basket; its per-piece cost is derived from the pack cost and count.

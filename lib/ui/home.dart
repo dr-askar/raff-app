@@ -353,8 +353,8 @@ class _HomeState extends State<Home> {
       ])),
       const SizedBox(height: 12), const Text('الملفات والنسخ الاحتياطي', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
       Card(child: Column(children: [
-        ListTile(leading: const Icon(Icons.download_outlined), title: const Text('تصدير المواد إلى Excel'), onTap: busy ? null : () => action(() => StoreFiles.shareBytes(StoreFiles.productExcel(s.products, s.settings), 'raff-products.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'ملف المواد جاهز للمشاركة')),
-        ListTile(leading: const Icon(Icons.upload_file_outlined), title: const Text('استيراد Excel'), subtitle: const Text('معاينة قبل الحفظ • نوع الصنف الفارغ = طرد'), onTap: busy ? null : importExcel),
+        ListTile(leading: const Icon(Icons.download_outlined), title: const Text('تصدير المواد إلى Excel'), subtitle: const Text('سعر الطرد وعدده ومحتواه • الوزن بالكيلوغرام'), onTap: busy ? null : () => action(() => StoreFiles.shareBytes(StoreFiles.productExcel(s.products, s.settings), 'raff-products.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'ملف المواد جاهز للمشاركة')),
+        ListTile(leading: const Icon(Icons.upload_file_outlined), title: const Text('استيراد Excel'), subtitle: const Text('أسعار الطرود • يدعم الملفات القديمة والكيلو • معاينة قبل الحفظ'), onTap: busy ? null : importExcel),
         ListTile(leading: const Icon(Icons.backup_outlined), title: const Text('تنزيل نسخة احتياطية'), subtitle: const Text('مواد وإعدادات وآخر سجل أسعار والجرد الحالي'), onTap: busy ? null : () => action(() => StoreFiles.shareJson(s.backup()), 'النسخة جاهزة. احفظها في مكان آمن')),
       ])),
     ],
@@ -385,7 +385,7 @@ class _HomeState extends State<Home> {
         trailing: Text('${money(h.before)}\n↓ ${money(h.after)}')))),
     ],
     if (!s.owner) const Padding(padding: EdgeInsets.all(24), child: Text('الميزات المتاحة تحددها صلاحياتك. اطلب من صاحب المحل تغييرها عند الحاجة.')),
-    const SizedBox(height: 24), const Center(child: Text('رفّ • 0.4.1', style: TextStyle(color: Colors.blueGrey))),
+    const SizedBox(height: 24), const Center(child: Text('رفّ • 0.4.2', style: TextStyle(color: Colors.blueGrey))),
   ]);
 
   Future<void> currencyDialog() async {

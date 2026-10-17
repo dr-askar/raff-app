@@ -27,13 +27,23 @@ class StoreFiles {
     final book = Excel.createExcel();
     final sheet = book['Products'];
     book.delete('Sheet1');
-    sheet.appendRow(['id', 'name', 'barcode', 'category', 'pack', 'quantity', 'cost_usd',
-      'margin_percent', 'manual_price', 'sale_price', 'exchange_rate', 'cost_currency', 'cost_syp', 'bargain_percent', 'نوع الصنف'].map(TextCellValue.new).toList());
+    sheet.appendRow(['id', 'اسم المادة', 'الباركود', 'التصنيف', 'عدد القطع بالطرد',
+      'عدد الطرود', 'سعر الطرد', 'عملة التكلفة', 'نسبة الربح',
+      'سعر مبيع الطرد الثابت', 'سعر مبيع الطرد', 'سعر الصرف', 'نسبة المساومة',
+      'قطع إضافية', 'وزن الطرد بالكيلوغرام', 'الكمية بالكيلوغرام', 'نوع الصنف']
+      .map(TextCellValue.new).toList());
     for (final p in products) {
+      final cartons = p.byWeight ? 0 : (p.quantity / p.pack).floor();
+      final loose = p.quantity - cartons * p.pack;
       sheet.appendRow([TextCellValue(p.id), TextCellValue(p.name), TextCellValue(p.barcode), TextCellValue(p.category),
-        p.pack == p.pack.roundToDouble() ? IntCellValue(p.pack.toInt()) : DoubleCellValue(p.pack), DoubleCellValue(p.quantity), p.costUsd == null ? null : DoubleCellValue(p.costUsd!),
-        p.margin == null ? null : DoubleCellValue(p.margin!), p.manualPrice == null ? null : DoubleCellValue(p.manualPrice!),
-        p.ready ? DoubleCellValue(p.price(settings)) : null, DoubleCellValue(settings.rate), TextCellValue(p.costCurrency), p.costLocal == null ? null : DoubleCellValue(p.costLocal!), DoubleCellValue(p.bargainPercent), TextCellValue(p.byWeight ? 'وزن' : 'طرد')]);
+        p.byWeight ? null : IntCellValue(p.pack.toInt()), p.byWeight ? null : IntCellValue(cartons),
+        p.packCost == null ? null : DoubleCellValue(p.packCost!), TextCellValue(p.costCurrency),
+        p.margin == null ? null : DoubleCellValue(p.margin!),
+        p.manualPrice == null ? null : DoubleCellValue(p.manualPrice! * p.pack),
+        p.ready ? DoubleCellValue(p.price(settings) * p.pack) : null,
+        DoubleCellValue(settings.rate), DoubleCellValue(p.bargainPercent),
+        p.byWeight ? null : DoubleCellValue(loose), p.byWeight ? DoubleCellValue(p.pack) : null,
+        p.byWeight ? DoubleCellValue(p.quantity) : null, TextCellValue(p.byWeight ? 'وزن' : 'طرد')]);
     }
     return book.encode()!;
   }
@@ -69,7 +79,13 @@ class StoreFiles {
       'تكلفة بالسوري': 'cost_syp', 'رأس المال بالسوري': 'cost_syp', 'عملة التكلفة': 'cost_currency',
       'وحدة البيع': 'unit', 'الوحدة': 'unit', 'سعر الطرد': 'cost_per_pack', 'تكلفة الطرد': 'cost_per_pack',
       'نوع الصنف': 'unit', 'نوع المادة': 'unit', 'طريقة البيع': 'unit',
-      'عدد القطع بالطرد': 'pack', 'عدد القطع في الطرد': 'pack', 'وزن الطرد بالكيلوغرام': 'pack',
+      'عدد القطع بالطرد': 'pack_pieces', 'عدد القطع في الطرد': 'pack_pieces',
+      'وزن الطرد بالكيلوغرام': 'pack_weight', 'وزن الطرد': 'pack_weight',
+      'عدد الطرود': 'pack_quantity', 'عدد الطرود المتوفرة': 'pack_quantity', 'عدد الكراتين': 'pack_quantity',
+      'قطع إضافية': 'loose_pieces', 'قطع اضافية': 'loose_pieces', 'القطع الإضافية': 'loose_pieces',
+      'الكمية بالكيلوغرام': 'quantity_kg', 'الكمية بالكيلو': 'quantity_kg',
+      'سعر مبيع الطرد الثابت': 'manual_pack_price', 'سعر بيع الطرد الثابت': 'manual_pack_price',
+      'سعر الطرد بالدولار': 'pack_cost_usd', 'سعر الطرد بالسوري': 'pack_cost_syp',
       'نسبة المساومة': 'bargain_percent', 'نسبة الربح': 'margin_percent', 'سعر ثابت': 'manual_price',
     };
     final planned = <Product>[], warnings = <String>[];
@@ -138,32 +154,66 @@ class StoreFiles {
         // A blank type cell explicitly selects the default (pack). Older files
         // without the column preserve an existing product's unit.
         final unit = headers.contains('unit') ? productUnit(field('unit')) : old?.unit ?? 'piece';
-        final pack = numeric('pack');
+        final pieces = numeric('pack_pieces'), weight = numeric('pack_weight');
+        if ((unit == 'kg' && pieces != null) || (unit == 'piece' && weight != null)) {
+          throw const FormatException('عدد القطع للطرد ووزن الطرد للصنف الموزون؛ تحقق من نوع الصنف');
+        }
+        final pack = (unit == 'kg' ? weight : pieces) ?? numeric('pack');
         final units = pack ?? old?.pack ?? 1.0;
         if (!['kg', 'piece'].contains(unit) || units <= 0 || (unit == 'piece' && (units < 1 || units != units.roundToDouble()))) {
           throw const FormatException('تحقق من وحدة البيع ومحتوى الطرد الموجب');
         }
+        bool differs(double a, double b) => (a - b).abs() > 0.00000001 * (1 + a.abs());
+        var quantity = numeric('quantity'); // Legacy files count pieces or kg.
+        final cartons = numeric('pack_quantity'), loose = numeric('loose_pieces');
+        final kilos = numeric('quantity_kg');
+        if ((unit == 'piece' && kilos != null) || (unit == 'kg' && loose != null)) {
+          throw const FormatException('الكمية بالكيلو للصنف الموزون والقطع الإضافية للطرد');
+        }
+        final packedQuantity = cartons == null && loose == null ? null : (cartons ?? 0) * units + (loose ?? 0);
+        final suppliedQuantity = kilos ?? packedQuantity;
+        if ((kilos != null && packedQuantity != null && differs(kilos, packedQuantity)) ||
+            (quantity != null && suppliedQuantity != null && differs(quantity, suppliedQuantity))) {
+          throw const FormatException('تعارض بين الكمية وعدد الطرود؛ املأ طريقة واحدة أو قيماً متطابقة');
+        }
+        quantity = suppliedQuantity ?? quantity;
         var usd = numeric('cost_usd'), local = numeric('cost_syp');
+        final bundleUsd = numeric('pack_cost_usd'), bundleLocal = numeric('pack_cost_syp');
+        if (bundleUsd != null && bundleLocal != null) { throw const FormatException('أدخل سعر الطرد بعملة واحدة'); }
         if (usd != null && local != null) { throw const FormatException('أدخل التكلفة بالدولار أو بالسوري في الصف، لا الاثنين معاً'); }
         var currency = field('cost_currency')?.toUpperCase();
         if (currency == 'سوري' || currency == 'ل.س') { currency = 'SYP'; }
         if (currency == 'دولار' || currency == '\$') { currency = 'USD'; }
-        currency ??= local != null ? 'SYP' : usd != null ? 'USD' : old?.costCurrency ?? 'USD';
-        if (!['USD', 'SYP'].contains(currency) || (currency == 'USD' && local != null) || (currency == 'SYP' && usd != null)) { throw const FormatException('عملة التكلفة لا تتوافق مع عمود التكلفة'); }
-        final bundle = numeric('cost_per_pack');
+        currency ??= local != null || bundleLocal != null ? 'SYP' : usd != null || bundleUsd != null ? 'USD' : old?.costCurrency ?? 'USD';
+        if (!['USD', 'SYP'].contains(currency) || (currency == 'USD' && (local != null || bundleLocal != null)) ||
+            (currency == 'SYP' && (usd != null || bundleUsd != null))) { throw const FormatException('عملة التكلفة لا تتوافق مع عمود التكلفة'); }
+        var bundle = numeric('cost_per_pack');
+        final currencyBundle = bundleUsd ?? bundleLocal;
+        if (bundle != null && currencyBundle != null && differs(bundle, currencyBundle)) {
+          throw const FormatException('تعارض في قيم سعر الطرد');
+        }
+        bundle ??= currencyBundle;
         if (bundle != null) {
           final single = bundle / units;
           final supplied = currency == 'SYP' ? local : usd;
-          if (supplied != null && (supplied - single).abs() > 0.00000001 * (1 + supplied.abs())) {
+          if (supplied != null && differs(supplied, single)) {
             throw const FormatException('تكلفة الطرد لا تتطابق مع تكلفة الوحدة ومحتوى الطرد');
           }
           if (currency == 'SYP') { local = single; } else { usd = single; }
         }
+        var manual = numeric('manual_price');
+        final manualPack = numeric('manual_pack_price');
+        if (manualPack != null) {
+          if (manual != null && differs(manual, manualPack / units)) {
+            throw const FormatException('تعارض بين سعر مبيع الطرد الثابت وسعر الوحدة القديم');
+          }
+          manual = manualPack / units;
+        }
         final base = old ?? Product(id: importedId ?? newId(), name: name!);
         if (old == null && byId.containsKey(base.id)) { throw const FormatException('معرف مكرر؛ أعد معاينة الملف'); }
         final p = base.edit(name: name, barcode: barcode, category: field('category'),
-          pack: pack, unit: unit, quantity: numeric('quantity'), costUsd: usd, costLocal: local, costCurrency: currency,
-          bargainPercent: numeric('bargain_percent'), margin: numeric('margin_percent'), manualPrice: numeric('manual_price'), settings: settings);
+          pack: pack, unit: unit, quantity: quantity, costUsd: usd, costLocal: local, costCurrency: currency,
+          bargainPercent: numeric('bargain_percent'), margin: numeric('margin_percent'), manualPrice: manual, settings: settings);
         p.validate();
         planned.add(p); plannedIds.add(p.id);
         if (old != null) {
