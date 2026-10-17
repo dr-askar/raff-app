@@ -23,6 +23,8 @@ def wait_for(fn, seconds=100):
         if result:
             return result
         time.sleep(1)
+    print('Timeout state:', prefs(), flush=True)
+    print('Visible UI:', [n.attrib for n in nodes()][-25:], flush=True)
     raise AssertionError('Timed out waiting for device condition')
 
 
@@ -46,6 +48,13 @@ def click_text(text):
             if n.attrib.get('text') == text and n.attrib.get('enabled') == 'true':
                 tap(n)
                 return True
+        # The result/device card can move focus down the ScrollView on API 37.
+        # Scroll back to the action instead of assuming it stays in the viewport.
+        size = re.search(r'(\d+)x(\d+)', adb('shell', 'wm', 'size'))
+        if size:
+            width, height = map(int, size.groups())
+            adb('shell', 'input', 'swipe', str(width//2), str(height//3),
+                str(width//2), str(height*4//5), '300')
         return False
     wait_for(find)
 
@@ -125,6 +134,7 @@ assert second.get('status') == '0', second
 after = adb('shell', 'cat', f'/data/user/0/{RAFF}/shared_prefs/FlutterSharedPreferences.xml')
 assert before == after
 print('PASS: helper re-install retained actual Raff preferences.', flush=True)
+adb('shell', 'am', 'force-stop', HELPER)
 adb('install', '--no-streaming', '-r', 'apk/ci-only-future.apk')
 adb('shell', 'am', 'start', '-W', '-n', HELPER + '/.MainActivity')
 click_text('تثبيت رفّ وإظهار النتيجة')
